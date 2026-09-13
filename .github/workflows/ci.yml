@@ -29,21 +29,21 @@ jobs:
       - name: Resolve Go dependencies
         run: go mod tidy
       - name: Typecheck web
-        id: typecheck
+        run: pnpm typecheck
+      - name: Build web
+        id: build_web
         continue-on-error: true
-        run: pnpm typecheck > typecheck.log 2>&1
-      - name: Upload typecheck diagnostics
-        if: steps.typecheck.outcome == 'failure'
+        run: pnpm build:web > build-web.log 2>&1
+      - name: Upload web build diagnostics
+        if: steps.build_web.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: typecheck-diagnostics
-          path: typecheck.log
+          name: web-build-diagnostics
+          path: build-web.log
           retention-days: 1
-      - name: Enforce typecheck
-        if: steps.typecheck.outcome == 'failure'
+      - name: Enforce web build
+        if: steps.build_web.outcome == 'failure'
         run: exit 1
-      - name: Build web
-        run: pnpm build:web
       - name: Test Go
         run: pnpm test:go
       - name: Build Go
