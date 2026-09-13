@@ -48,3 +48,25 @@ func TestDefensiveMatchupDeterministic(t *testing.T) {
 		t.Fatalf("same offensive/defensive calls diverged: %#v %#v / %#v %#v", a, b, aEvent, bEvent)
 	}
 }
+
+func TestSpikeStopsClockAndConsumesDown(t *testing.T) {
+	e := New()
+	s := NewGame("g", "X", "O", 77)
+	s.Possession = s.HomeID
+	s.Clock = 55
+	event := e.Play(&s, Spike)
+	if event.Type != "spike" || s.Clock != 54 || s.Down != 2 || s.Ball != 25 {
+		t.Fatalf("unexpected spike result: %#v %#v", s, event)
+	}
+}
+
+func TestKneelBurnsClockAndLosesOneYard(t *testing.T) {
+	e := New()
+	s := NewGame("g", "X", "O", 88)
+	s.Possession = s.HomeID
+	s.Clock = 90
+	event := e.Play(&s, Kneel)
+	if event.Type != "kneel" || s.Clock != 50 || s.Down != 2 || s.Ball != 24 {
+		t.Fatalf("unexpected kneel result: %#v %#v", s, event)
+	}
+}
