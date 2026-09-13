@@ -83,7 +83,7 @@ func (h *Hub) add(id string, conn *websocket.Conn) {
 
 func (h *Hub) remove(id string, conn *websocket.Conn) {
 	h.mu.Lock()
-	de h.mu.Unlock()
+	defer h.mu.Unlock()
 	delete(h.rooms[id], conn)
 	if len(h.rooms[id]) == 0 {
 		delete(h.rooms, id)
