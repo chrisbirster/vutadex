@@ -72,6 +72,7 @@ type Offer struct {
 
 type PlayerAsset struct {
 	ID        string `json:"id"`
+	LeagueID  string `json:"leagueId"`
 	TeamID    string `json:"teamId,omitempty"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
@@ -96,11 +97,11 @@ type DraftSelection struct {
 }
 
 type TradeEvaluation struct {
-	Accept       bool `json:"accept"`
-	Incoming     int  `json:"incoming"`
-	Outgoing     int  `json:"outgoing"`
-	NetValue     int  `json:"netValue"`
-	RequiredEdge int  `json:"requiredEdge"`
+	Accept       bool   `json:"accept"`
+	Incoming     int    `json:"incoming"`
+	Outgoing     int    `json:"outgoing"`
+	NetValue     int    `json:"netValue"`
+	RequiredEdge int    `json:"requiredEdge"`
 	Reason       string `json:"reason"`
 }
 
