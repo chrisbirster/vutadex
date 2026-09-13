@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install web dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Resolve Go dependencies
+        run: go mod tidy
+      - name: Typecheck web
+        run: pnpm typecheck
+      - name: Build web
+        id: build_web
+        continue-on-error: true
+        run: pnpm build:web > build-web.log 2>&1
+      - name: Upload web build diagnostics
+        if: steps.build_web.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build-diagnostics
+          path: build-web.log
+          retention-days: 1
+      - name: Enforce web build
+        if: steps.build_web.outcome == 'failure'
+        run: exit 1
+      - name: Test Go
+        run: pnpm test:go
+      - name: Build Go
+        run: pnpm build:server
+      - name: Build container
+        run: docker build -t vutadex:test .
