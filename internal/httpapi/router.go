@@ -63,20 +63,36 @@ func New(web http.Handler, o Options) http.Handler {
 		jsonOut(w, http.StatusOK, current)
 	})
 	mux.HandleFunc("POST /api/v1/demo/games/{gameID}/plays", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			PlayID string `json:"playId"`
-		}
+		var in game.Decision
 		if err := decode(r, &in); err != nil {
 			problem(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		current, newEvents, err := games.CallPlay(r.PathValue("gameID"), strings.TrimSpace(in.PlayID))
+		current, newEvents, err := games.CallDecision(r.PathValue("gameID"), in)
 		if err != nil {
 			gameProblem(w, err)
 			return
 		}
 		if o.Hub != nil {
 			o.Hub.Broadcast(r.Context(), current.State.ID, map[string]any{"type": "snap", "game": current, "newEvents": newEvents})
+		}
+		jsonOut(w, http.StatusOK, current)
+	})
+	mux.HandleFunc("POST /api/v1/demo/games/{gameID}/actions", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Action string `json:"action"`
+		}
+		if err := decode(r, &in); err != nil {
+			problem(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		current, event, err := games.Action(r.PathValue("gameID"), in.Action)
+		if err != nil {
+			gameProblem(w, err)
+			return
+		}
+		if o.Hub != nil {
+			o.Hub.Broadcast(r.Context(), current.State.ID, map[string]any{"type": "coaching", "game": current, "event": event})
 		}
 		jsonOut(w, http.StatusOK, current)
 	})

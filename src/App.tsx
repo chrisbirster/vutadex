@@ -89,12 +89,18 @@ function XOField() {
   );
 }
 
+function specialPlay(id: string, name: string): PlaybookPlay {
+  return { id, name, side: "offense", formation: "Situational", personnel: "special", concept: id.replace("special-", "") };
+}
+
 function GameHome() {
   const params = useParams();
   const navigate = useNavigate();
   const [game, setGame] = createSignal<Simulation>();
   const [offensePlays, setOffensePlays] = createSignal<PlaybookPlay[]>([]);
   const [defensePlays, setDefensePlays] = createSignal<PlaybookPlay[]>([]);
+  const [selectedPlay, setSelectedPlay] = createSignal<PlaybookPlay>();
+  const [originalPlayID, setOriginalPlayID] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
 
@@ -120,6 +126,7 @@ function GameHome() {
   async function newGame(showBusy = true) {
     if (showBusy) setBusy(true);
     setError("");
+    clearSelection();
     try {
       const created = await api.createGame(Math.floor(Math.random() * 1_000_000_000));
       setGame(created);
@@ -131,15 +138,44 @@ function GameHome() {
     }
   }
 
-  async function call(playId: string) {
+  function choose(play: PlaybookPlay) {
+    if (!selectedPlay()) {
+      setOriginalPlayID(play.id);
+    }
+    setSelectedPlay(play);
+  }
+
+  function clearSelection() {
+    setSelectedPlay(undefined);
+    setOriginalPlayID("");
+  }
+
+  async function snap() {
+    const current = game();
+    const selected = selectedPlay();
+    if (!current || !selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      const audibleFrom = originalPlayID() !== selected.id ? originalPlayID() : "";
+      setGame(await api.callPlay(current.state.id, selected.id, audibleFrom));
+      clearSelection();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Play call failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function coachingAction(action: "timeout" | "hurry_up_on" | "hurry_up_off") {
     const current = game();
     if (!current) return;
     setBusy(true);
     setError("");
     try {
-      setGame(await api.callPlay(current.state.id, playId));
+      setGame(await api.coachingAction(current.state.id, action));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Play call failed");
+      setError(cause instanceof Error ? cause.message : "Coaching action failed");
     } finally {
       setBusy(false);
     }
@@ -152,7 +188,8 @@ function GameHome() {
     return Boolean(state && state.possession === state.homeId);
   };
   const currentPlays = () => isOffense() ? offensePlays() : defensePlays();
-  const canCall = () => Boolean(game() && !game()!.state.finished && !busy());
+  const canAct = () => Boolean(game() && !game()!.state.finished && !busy());
+  const isAudible = () => Boolean(selectedPlay() && originalPlayID() && selectedPlay()!.id !== originalPlayID());
 
   return (
     <>
@@ -170,6 +207,9 @@ function GameHome() {
                 Q{game()!.state.quarter} {formatClock(game()!.state.clock)} · {downAndDistance(game()!.state.down, game()!.state.distance)} · {fieldPosition(game()!.state.ball)} · PLAY {game()!.playClock}s
               </Show>
             </div>
+            <Show when={game()}>
+              <div {...stylex.attrs(s.muted)}>TO {game()!.timeouts} · {game()!.hurryUp ? "HURRY-UP" : "NORMAL TEMPO"}</div>
+            </Show>
           </div>
           <div style={{ "text-align": "right" }}>
             <div {...stylex.attrs(s.team)}>TEAM O</div>
@@ -181,40 +221,87 @@ function GameHome() {
           <div {...stylex.attrs(s.card)} style={{ "margin-bottom": "16px", color: colors.danger }}>{error()}</div>
         </Show>
 
+        <Show when={game()?.fourthDown}>
+          <div {...stylex.attrs(s.card)} style={{ "margin-bottom": "16px" }}>
+            <div {...stylex.attrs(s.kicker)}>4TH-DOWN ADVISOR · {game()!.fourthDown!.label.toUpperCase()}</div>
+            <p {...stylex.attrs(s.muted)}>{game()!.fourthDown!.reason}</p>
+          </div>
+        </Show>
+
         <div {...stylex.attrs(s.grid)}>
           <div>
             <XOField />
             <section {...stylex.attrs(s.card)} style={{ "margin-top": "18px" }}>
-              <div {...stylex.attrs(s.kicker)}>{isOffense() ? "OFFENSIVE PLAY CALL" : "DEFENSIVE PLAY CALL"}</div>
+              <div {...stylex.attrs(s.kicker)}>PRE-SNAP · {isOffense() ? "OFFENSE" : "DEFENSE"}</div>
               <p {...stylex.attrs(s.muted)}>
-                {isOffense()
-                  ? "Choose a VutaDex offensive concept. Scoring, punts, and turnovers switch you to the defensive playbook."
-                  : "Choose the coverage or pressure for this snap. Your call changes the CPU offense's deterministic matchup odds."}
+                Select a call, change it before the snap to record an audible, then snap. The server validates the final call against the side of the ball you currently coach.
               </p>
+
               <div {...stylex.attrs(s.actions)}>
                 <For each={currentPlays()}>
                   {(play) => (
                     <button
                       type="button"
                       {...stylex.attrs(s.button, s.ghost)}
-                      disabled={!canCall()}
-                      onClick={() => call(play.id)}
+                      disabled={!canAct()}
+                      aria-pressed={selectedPlay()?.id === play.id ? "true" : "false"}
+                      onClick={() => choose(play)}
                       title={`${play.formation} · ${play.personnel} personnel · ${play.concept}`}
                     >
-                      {play.name}
+                      {selectedPlay()?.id === play.id ? "✓ " : ""}{play.name}
                     </button>
                   )}
                 </For>
               </div>
+
               <Show when={isOffense()}>
                 <div {...stylex.attrs(s.actions)} style={{ "margin-top": "12px" }}>
-                  <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-punt")}>Punt</button>
-                  <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-field-goal")}>Field goal</button>
+                  <For each={[
+                    specialPlay("special-punt", "Punt"),
+                    specialPlay("special-field-goal", "Field goal"),
+                    specialPlay("special-kneel", "Kneel"),
+                    specialPlay("special-spike", "Spike"),
+                  ]}>
+                    {(play) => (
+                      <button
+                        type="button"
+                        {...stylex.attrs(s.button, s.ghost)}
+                        disabled={!canAct()}
+                        aria-pressed={selectedPlay()?.id === play.id ? "true" : "false"}
+                        onClick={() => choose(play)}
+                      >
+                        {selectedPlay()?.id === play.id ? "✓ " : ""}{play.name}
+                      </button>
+                    )}
+                  </For>
                 </div>
               </Show>
-              <div {...stylex.attrs(s.actions)} style={{ "margin-top": "12px" }}>
+
+              <Show when={selectedPlay()}>
+                <div {...stylex.attrs(s.card)} style={{ "margin-top": "16px" }}>
+                  <div {...stylex.attrs(s.kicker)}>{isAudible() ? "AUDIBLE" : "CALL READY"}</div>
+                  <strong>{selectedPlay()!.name}</strong>
+                  <div {...stylex.attrs(s.muted)}>{selectedPlay()!.formation} · {selectedPlay()!.concept}</div>
+                  <div {...stylex.attrs(s.actions)} style={{ "margin-top": "12px" }}>
+                    <button type="button" {...stylex.attrs(s.button)} disabled={!canAct()} onClick={() => void snap()}>Snap</button>
+                    <button type="button" {...stylex.attrs(s.button, s.ghost)} disabled={busy()} onClick={clearSelection}>Clear</button>
+                  </div>
+                </div>
+              </Show>
+
+              <div {...stylex.attrs(s.actions)} style={{ "margin-top": "16px" }}>
+                <button type="button" {...stylex.attrs(s.button, s.ghost)} disabled={!canAct() || (game()?.timeouts ?? 0) <= 0} onClick={() => void coachingAction("timeout")}>Timeout ({game()?.timeouts ?? 0})</button>
+                <button
+                  type="button"
+                  {...stylex.attrs(s.button, s.ghost)}
+                  disabled={!canAct()}
+                  onClick={() => void coachingAction(game()?.hurryUp ? "hurry_up_off" : "hurry_up_on")}
+                >
+                  {game()?.hurryUp ? "Normal tempo" : "Hurry-up"}
+                </button>
                 <button type="button" {...stylex.attrs(s.button, s.ghost)} disabled={busy()} onClick={() => void newGame()}>New game</button>
               </div>
+
               <Show when={game()?.state.finished}>
                 <p><strong>FINAL:</strong> Team X {game()!.state.homeScore}, Team O {game()!.state.awayScore}</p>
               </Show>
@@ -224,7 +311,7 @@ function GameHome() {
           <aside {...stylex.attrs(s.card)}>
             <div {...stylex.attrs(s.kicker)}>PLAY-BY-PLAY</div>
             <p {...stylex.attrs(s.muted)}>
-              The Go server owns possession, matchup resolution, and the play deadline. An expired offensive clock is delay-of-game; an expired defensive clock falls back to Cover 3 for the CPU snap.
+              Snap calls, audibles, timeouts, tempo changes and play-clock enforcement are semantic server events. The same stream can later drive multiplayer spectators and the Dex replay history.
             </p>
             <div {...stylex.attrs(s.feed)} style={{ "margin-top": "18px" }}>
               <For each={game()?.events.slice().reverse() ?? []}>
@@ -236,7 +323,7 @@ function GameHome() {
                 )}
               </For>
               <Show when={!game()?.events.length}>
-                <div {...stylex.attrs(s.muted)}>Call the first play to begin the drive.</div>
+                <div {...stylex.attrs(s.muted)}>Select the first call to begin the game.</div>
               </Show>
             </div>
           </aside>

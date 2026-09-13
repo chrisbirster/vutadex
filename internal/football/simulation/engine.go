@@ -16,6 +16,8 @@ const (
 	DeepPass  Call = "deep_pass"
 	Punt      Call = "punt"
 	FieldGoal Call = "field_goal"
+	Kneel     Call = "kneel"
+	Spike     Call = "spike"
 
 	DefenseNeutral Defense = "neutral"
 	DefenseMan     Defense = "man"
@@ -26,7 +28,7 @@ const (
 
 type Engine struct{ version string }
 
-func New() *Engine          { return &Engine{version: "sim-0.2"} }
+func New() *Engine          { return &Engine{version: "sim-0.3"} }
 func (e *Engine) Version() string { return e.version }
 
 func NewGame(id, home, away string, seed uint64) model.GameState {
@@ -48,6 +50,12 @@ func (e *Engine) play(s *model.GameState, call Call, defense Defense) model.Even
 	rng := newRNG(s.Seed ^ uint64(s.PlayNumber+1)*0x9e3779b97f4a7c15)
 	beforeClock := s.Clock
 	elapsed := int(18 + rng.next()%23)
+	switch call {
+	case Spike:
+		elapsed = 1
+	case Kneel:
+		elapsed = 40
+	}
 	if elapsed > s.Clock {
 		elapsed = s.Clock
 	}
@@ -116,6 +124,13 @@ func (e *Engine) play(s *model.GameState, call Call, defense Defense) model.Even
 			desc = "Deep pass incomplete"
 			s.Clock = max(0, beforeClock-7)
 		}
+	case Kneel:
+		typ = "kneel"
+		yards = -1
+		desc = "Quarterback kneel for 1-yard loss"
+	case Spike:
+		typ = "spike"
+		desc = "Quarterback spike to stop the clock"
 	case Punt:
 		typ = "punt"
 		dist := 38 + int(rng.next()%18)
@@ -148,7 +163,7 @@ func (e *Engine) play(s *model.GameState, call Call, defense Defense) model.Even
 		return model.Event{Sequence: s.PlayNumber, Type: typ, Quarter: eventQuarter(s), Clock: s.Clock, Description: desc, Scoring: scoring}
 	}
 
-	s.Ball += yards
+	s.Ball = clamp(s.Ball+yards, 1, 100)
 	if s.Ball >= 100 {
 		addScore(s, 6)
 		scoring = true
