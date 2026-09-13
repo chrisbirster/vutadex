@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS players (
   id text PRIMARY KEY,
   league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   team_id text REFERENCES teams(id) ON DELETE SET NULL,
-  roster_status text NOT NULL DEFAULT 'roster' CHECK(roster_status IN ('roster','free_agent','waivers','draft')),
+  roster_status text NOT NULL DEFAULT 'roster' CHECK(roster_status IN ('roster','free_agent','waivers','draft','retired')),
   first_name text NOT NULL,
   last_name text NOT NULL,
   position text NOT NULL,
@@ -64,6 +64,56 @@ CREATE TABLE IF NOT EXISTS players (
 );
 CREATE INDEX IF NOT EXISTS players_league_team_idx ON players(league_id,team_id);
 CREATE INDEX IF NOT EXISTS players_league_status_idx ON players(league_id,roster_status,overall DESC);
+CREATE TABLE IF NOT EXISTS player_lifecycle_state (
+  player_id text PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  experience integer NOT NULL DEFAULT 0 CHECK(experience >= 0),
+  durability integer NOT NULL DEFAULT 75 CHECK(durability BETWEEN 1 AND 99),
+  retired_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS player_lifecycle_league_idx ON player_lifecycle_state(league_id);
+CREATE TABLE IF NOT EXISTS scouting_reports (
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  observations integer NOT NULL CHECK(observations > 0),
+  overall_low integer NOT NULL CHECK(overall_low BETWEEN 1 AND 99),
+  overall_high integer NOT NULL CHECK(overall_high BETWEEN 1 AND 99),
+  potential_low integer NOT NULL CHECK(potential_low BETWEEN 1 AND 99),
+  potential_high integer NOT NULL CHECK(potential_high BETWEEN 1 AND 99),
+  confidence integer NOT NULL CHECK(confidence BETWEEN 0 AND 100),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(user_id,player_id)
+);
+CREATE INDEX IF NOT EXISTS scouting_reports_league_user_idx ON scouting_reports(league_id,user_id,updated_at DESC);
+CREATE TABLE IF NOT EXISTS injuries (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  severity text NOT NULL CHECK(severity IN ('minor','moderate','major')),
+  weeks_remaining integer NOT NULL CHECK(weeks_remaining >= 0),
+  occurred_season integer NOT NULL,
+  occurred_week integer NOT NULL CHECK(occurred_week > 0),
+  status text NOT NULL CHECK(status IN ('active','recovered')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  recovered_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS injuries_league_status_idx ON injuries(league_id,status,weeks_remaining DESC);
+CREATE INDEX IF NOT EXISTS injuries_player_idx ON injuries(player_id,status,created_at DESC);
+CREATE TABLE IF NOT EXISTS player_lifecycle_events (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  season integer NOT NULL,
+  kind text NOT NULL CHECK(kind IN ('development','retirement','injury','recovery')),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS player_lifecycle_events_league_idx ON player_lifecycle_events(league_id,occurred_at DESC);
+CREATE INDEX IF NOT EXISTS player_lifecycle_events_player_idx ON player_lifecycle_events(player_id,occurred_at DESC);
 CREATE TABLE IF NOT EXISTS contracts (
   id text PRIMARY KEY,
   league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
