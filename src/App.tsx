@@ -1,7 +1,7 @@
-import { createRouter, useNavigate, useSearchParams } from "@solidjs/router";
-import { For, Show, createSignal } from "solid-js";
+import { createRouter, useNavigate, useParams, useSearchParams } from "@solidjs/router";
+import { For, Show, createSignal, onMount } from "solid-js";
 import * as stylex from "@stylexjs/stylex";
-import { api, type Simulation } from "./api";
+import { api, type PlaybookPlay, type Simulation } from "./api";
 import { colors, s } from "./styles.stylex";
 
 function isGameHost() {
@@ -90,17 +90,67 @@ function XOField() {
 }
 
 function GameHome() {
-  const [sim, setSim] = createSignal<Simulation>();
+  const params = useParams();
+  const navigate = useNavigate();
+  const [game, setGame] = createSignal<Simulation>();
+  const [plays, setPlays] = createSignal<PlaybookPlay[]>([]);
   const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal("");
 
-  async function run() {
+  async function bootstrap() {
     setBusy(true);
+    setError("");
     try {
-      setSim(await api.simulate(Math.floor(Math.random() * 1_000_000)));
+      const books = await api.playbooks();
+      setPlays(books.offense);
+      if (params.id) {
+        setGame(await api.game(params.id));
+      } else {
+        await newGame(false);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load Coach Mode");
     } finally {
       setBusy(false);
     }
   }
+
+  async function newGame(showBusy = true) {
+    if (showBusy) setBusy(true);
+    setError("");
+    try {
+      const created = await api.createGame(Math.floor(Math.random() * 1_000_000_000));
+      setGame(created);
+      navigate(`/game/${created.state.id}`, { replace: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to start game");
+    } finally {
+      if (showBusy) setBusy(false);
+    }
+  }
+
+  async function call(playId: string) {
+    const current = game();
+    if (!current) return;
+    setBusy(true);
+    setError("");
+    try {
+      setGame(await api.callPlay(current.state.id, playId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Play call failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  onMount(() => {
+    void bootstrap();
+  });
+
+  const canCall = () => {
+    const state = game()?.state;
+    return Boolean(state && !state.finished && state.possession === state.homeId && !busy());
+  };
 
   return (
     <>
@@ -112,24 +162,64 @@ function GameHome() {
             <div {...stylex.attrs(s.muted)}>Coach: You</div>
           </div>
           <div {...stylex.attrs(s.center)}>
-            <strong>{sim()?.state.homeScore ?? 0} — {sim()?.state.awayScore ?? 0}</strong>
-            <div {...stylex.attrs(s.muted)}>X/O COACH MODE</div>
+            <strong>{game()?.state.homeScore ?? 0} — {game()?.state.awayScore ?? 0}</strong>
+            <div {...stylex.attrs(s.muted)}>
+              <Show when={game()} fallback="LOADING COACH MODE">
+                Q{game()!.state.quarter} {formatClock(game()!.state.clock)} · {downAndDistance(game()!.state.down, game()!.state.distance)} · {fieldPosition(game()!.state.ball)}
+              </Show>
+            </div>
           </div>
           <div style={{ "text-align": "right" }}>
             <div {...stylex.attrs(s.team)}>TEAM O</div>
             <div {...stylex.attrs(s.muted)}>CPU</div>
           </div>
         </div>
+
+        <Show when={error()}>
+          <div {...stylex.attrs(s.card)} style={{ "margin-bottom": "16px", color: colors.danger }}>{error()}</div>
+        </Show>
+
         <div {...stylex.attrs(s.grid)}>
-          <XOField />
+          <div>
+            <XOField />
+            <section {...stylex.attrs(s.card)} style={{ "margin-top": "18px" }}>
+              <div {...stylex.attrs(s.kicker)}>OFFENSIVE PLAY CALL</div>
+              <p {...stylex.attrs(s.muted)}>
+                Choose a VutaDex concept. When your possession ends, the CPU runs its drive through the same deterministic engine and returns control to Team X.
+              </p>
+              <div {...stylex.attrs(s.actions)}>
+                <For each={plays()}>
+                  {(play) => (
+                    <button
+                      type="button"
+                      {...stylex.attrs(s.button, s.ghost)}
+                      disabled={!canCall()}
+                      onClick={() => call(play.id)}
+                      title={`${play.formation} · ${play.personnel} personnel · ${play.concept}`}
+                    >
+                      {play.name}
+                    </button>
+                  )}
+                </For>
+              </div>
+              <div {...stylex.attrs(s.actions)} style={{ "margin-top": "12px" }}>
+                <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-punt")}>Punt</button>
+                <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-field-goal")}>Field goal</button>
+                <button type="button" {...stylex.attrs(s.button, s.ghost)} disabled={busy()} onClick={() => void newGame()}>New game</button>
+              </div>
+              <Show when={game()?.state.finished}>
+                <p><strong>FINAL:</strong> Team X {game()!.state.homeScore}, Team O {game()!.state.awayScore}</p>
+              </Show>
+            </section>
+          </div>
+
           <aside {...stylex.attrs(s.card)}>
             <div {...stylex.attrs(s.kicker)}>PLAY-BY-PLAY</div>
             <p {...stylex.attrs(s.muted)}>
-              The Go engine is deterministic and authoritative. This button runs a complete seeded game while M6 evolves into snap-by-snap coach mode.
+              Game state is owned by the Go server. Each button advances exactly one human snap; opponent snaps are clearly listed in the same event stream.
             </p>
-            <button {...stylex.attrs(s.button)} disabled={busy()} onClick={run}>{busy() ? "Simulating…" : "Simulate game"}</button>
             <div {...stylex.attrs(s.feed)} style={{ "margin-top": "18px" }}>
-              <For each={sim()?.events.slice(-18).reverse() ?? []}>
+              <For each={game()?.events.slice().reverse() ?? []}>
                 {(event) => (
                   <div {...stylex.attrs(s.play)}>
                     <strong>Q{event.quarter}</strong> {formatClock(event.clock)}<br />
@@ -137,6 +227,9 @@ function GameHome() {
                   </div>
                 )}
               </For>
+              <Show when={!game()?.events.length}>
+                <div {...stylex.attrs(s.muted)}>Call the first play to begin the drive.</div>
+              </Show>
             </div>
           </aside>
         </div>
@@ -225,4 +318,14 @@ export function App() {
 
 function formatClock(seconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function downAndDistance(down: number, distance: number) {
+  const suffix = down === 1 ? "st" : down === 2 ? "nd" : down === 3 ? "rd" : "th";
+  return `${down}${suffix} & ${distance}`;
+}
+
+function fieldPosition(ball: number) {
+  if (ball === 50) return "50";
+  return ball < 50 ? `OWN ${ball}` : `OPP ${100 - ball}`;
 }
