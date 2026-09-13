@@ -2,7 +2,7 @@ import { createRouter, useNavigate, useSearchParams } from "@solidjs/router";
 import { For, Show, createSignal } from "solid-js";
 import * as stylex from "@stylexjs/stylex";
 import { api, type Simulation } from "./api";
-import { colors, s } from "./styles";
+import { colors, s } from "./styles.stylex";
 
 function isGameHost() {
   return location.hostname.startsWith("game.");
