@@ -13,6 +13,8 @@ import (
 
 	"github.com/chrisbirster/vutadex/internal/auth"
 	"github.com/chrisbirster/vutadex/internal/database"
+	"github.com/chrisbirster/vutadex/internal/franchise"
+	"github.com/chrisbirster/vutadex/internal/franchisehttp"
 	"github.com/chrisbirster/vutadex/internal/game"
 	"github.com/chrisbirster/vutadex/internal/httpapi"
 	"github.com/chrisbirster/vutadex/internal/live/espn"
@@ -39,12 +41,18 @@ func main() {
 
 	var authStore auth.Store
 	var gameRepo game.Repository
+	var franchiseRepo franchise.Repository
+	var franchiseAccess franchise.Authorizer
 	if db != nil {
 		authStore = auth.NewPostgresStore(db)
 		gameRepo = game.NewPostgresRepository(db)
+		franchiseRepo = franchise.NewPostgresRepository(db)
+		franchiseAccess = franchise.NewPostgresAuthorizer(db)
 	} else {
 		authStore = auth.NewMemoryStore()
 		gameRepo = game.NewMemoryRepository()
+		franchiseRepo = franchise.NewMemoryRepository()
+		franchiseAccess = franchise.AllowAllAuthorizer{}
 	}
 
 	sender, err := emailSender(production)
@@ -53,9 +61,15 @@ func main() {
 		os.Exit(1)
 	}
 	authService := auth.NewService(authStore, sender, gameOrigin)
+	franchiseService := franchise.NewService(franchiseRepo, franchise.DefaultSalaryCap)
 	hub := realtime.New(hostPattern(gameOrigin), hostPattern(marketingOrigin), "localhost:5173", "127.0.0.1:5173")
 
-	handler := httpapi.New(webapp.Handler(), httpapi.Options{
+	webAndFranchise := franchisehttp.New(webapp.Handler(), franchisehttp.Options{
+		Service: franchiseService,
+		Access:  franchiseAccess,
+		Auth:    authService,
+	})
+	handler := httpapi.New(webAndFranchise, httpapi.Options{
 		MarketingOrigin: marketingOrigin,
 		GameOrigin:      gameOrigin,
 		CookieSecure:    env("VUTADEX_COOKIE_SECURE", "0") == "1",
