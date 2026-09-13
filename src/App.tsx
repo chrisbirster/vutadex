@@ -2,6 +2,7 @@ import { createRouter, useNavigate, useParams, useSearchParams } from "@solidjs/
 import { For, Show, createSignal } from "solid-js";
 import * as stylex from "@stylexjs/stylex";
 import { api, type PlaybookPlay, type Simulation } from "./api";
+import { MultiplayerLobby, MultiplayerRoom } from "./multiplayer";
 import { colors, s } from "./styles.stylex";
 
 function isGameHost() {
@@ -17,6 +18,7 @@ function Nav() {
     <nav {...stylex.attrs(s.nav)}>
       <a href="/" {...stylex.attrs(s.brand)}>VUTADEX</a>
       <div {...stylex.attrs(s.links)}>
+        <a href="/multiplayer" {...stylex.attrs(s.link)}>Multiplayer</a>
         <a href="https://vutadex.com" {...stylex.attrs(s.link)}>About</a>
         <a href="https://game.vutadex.com" {...stylex.attrs(s.button)}>Play</a>
       </div>
@@ -420,6 +422,8 @@ const Router = createRouter({
     { path: "/", component: Root },
     { path: "/game", component: GameHome },
     { path: "/game/:id", component: GameHome },
+    { path: "/multiplayer", component: MultiplayerLobby },
+    { path: "/room/:roomId", component: MultiplayerRoom },
     { path: "/login", component: Login },
     { path: "/login/verify", component: Verify },
     { path: "*404", component: NotFound },
