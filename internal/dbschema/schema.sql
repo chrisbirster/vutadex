@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS teams (
   primary_color text NOT NULL DEFAULT '#17ff7a',
   secondary_color text NOT NULL DEFAULT '#07110b'
 );
+CREATE TABLE IF NOT EXISTS seasons (
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  season integer NOT NULL,
+  status text NOT NULL CHECK(status IN ('regular','postseason','complete')),
+  current_week integer NOT NULL DEFAULT 1 CHECK(current_week > 0),
+  champion_team_id text REFERENCES teams(id) ON DELETE SET NULL,
+  seed bigint NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz,
+  PRIMARY KEY(league_id,season)
+);
+CREATE INDEX IF NOT EXISTS seasons_status_idx ON seasons(status,season DESC);
 CREATE TABLE IF NOT EXISTS franchise_memberships (
   league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
@@ -176,18 +188,25 @@ CREATE TABLE IF NOT EXISTS waiver_claims (
 CREATE INDEX IF NOT EXISTS waiver_claims_league_player_idx ON waiver_claims(league_id,player_id,priority,created_at);
 CREATE TABLE IF NOT EXISTS games (
   id text PRIMARY KEY,
-  league_id text REFERENCES leagues(id) ON DELETE CASCADE,
+  league_id text NOT NULL,
+  season integer NOT NULL,
+  week integer NOT NULL CHECK(week > 0),
+  phase text NOT NULL DEFAULT 'regular' CHECK(phase IN ('regular','semifinal','championship')),
   home_team_id text NOT NULL REFERENCES teams(id),
   away_team_id text NOT NULL REFERENCES teams(id),
-  status text NOT NULL DEFAULT 'scheduled',
+  status text NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','final')),
   engine_version text NOT NULL,
   seed bigint NOT NULL,
   scheduled_at timestamptz,
   started_at timestamptz,
   finished_at timestamptz,
   home_score integer NOT NULL DEFAULT 0,
-  away_score integer NOT NULL DEFAULT 0
+  away_score integer NOT NULL DEFAULT 0,
+  winner_team_id text REFERENCES teams(id) ON DELETE SET NULL,
+  FOREIGN KEY(league_id,season) REFERENCES seasons(league_id,season) ON DELETE CASCADE,
+  CHECK(home_team_id <> away_team_id)
 );
+CREATE INDEX IF NOT EXISTS games_league_season_week_idx ON games(league_id,season,week,phase,status);
 CREATE TABLE IF NOT EXISTS coach_games (
   id text PRIMARY KEY,
   user_id text REFERENCES users(id) ON DELETE SET NULL,
