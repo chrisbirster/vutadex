@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/
+.idea/
+vutadex
+coverage/
+internal/web/dist/*
+!internal/web/dist/index.html
+.sst/
+.fly/
