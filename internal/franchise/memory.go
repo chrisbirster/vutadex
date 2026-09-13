@@ -31,6 +31,13 @@ func NewMemoryRepository() *MemoryRepository {
 func (r *MemoryRepository) SeedPlayer(player PlayerAsset) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if player.Status == "" {
+		if player.TeamID == "" {
+			player.Status = PlayerFreeAgent
+		} else {
+			player.Status = PlayerRoster
+		}
+	}
 	r.players[player.ID] = player
 }
 
@@ -74,7 +81,7 @@ func (r *MemoryRepository) FreeAgents(_ context.Context, leagueID string) ([]Pla
 	defer r.mu.Unlock()
 	out := make([]PlayerAsset, 0)
 	for _, player := range r.players {
-		if player.LeagueID == leagueID && player.TeamID == "" {
+		if player.LeagueID == leagueID && player.Status == PlayerFreeAgent {
 			out = append(out, player)
 		}
 	}
@@ -137,6 +144,10 @@ func (r *MemoryRepository) Offer(_ context.Context, id string) (Offer, error) {
 	if !ok {
 		return Offer{}, ErrNotFound
 	}
+	if offer.Status == OfferOpen && time.Now().UTC().After(offer.ExpiresAt) {
+		offer.Status = OfferExpired
+		r.offers[id] = offer
+	}
 	return cloneOffer(offer), nil
 }
 
@@ -186,13 +197,14 @@ func (r *MemoryRepository) Sign(_ context.Context, contract Contract, txn Transa
 	if !ok {
 		return ErrNotFound
 	}
-	if player.TeamID != "" {
+	if player.Status != PlayerFreeAgent || player.TeamID != "" {
 		return errors.New("player is no longer a free agent")
 	}
 	if _, exists := r.contracts[player.ID]; exists {
 		return errors.New("player already has a contract")
 	}
 	player.TeamID = contract.TeamID
+	player.Status = PlayerRoster
 	r.players[player.ID] = player
 	r.contracts[player.ID] = contract
 	r.transactions = append(r.transactions, cloneTransaction(txn))
@@ -206,10 +218,11 @@ func (r *MemoryRepository) Release(_ context.Context, teamID, playerID string, t
 	if !ok {
 		return ErrNotFound
 	}
-	if player.TeamID != teamID {
+	if player.TeamID != teamID || player.Status != PlayerRoster {
 		return errors.New("team no longer controls player")
 	}
 	player.TeamID = ""
+	player.Status = PlayerWaivers
 	r.players[playerID] = player
 	delete(r.contracts, playerID)
 	r.transactions = append(r.transactions, cloneTransaction(txn))
@@ -219,6 +232,13 @@ func (r *MemoryRepository) Release(_ context.Context, teamID, playerID string, t
 func (r *MemoryRepository) SubmitWaiverClaim(_ context.Context, claim WaiverClaim) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	player, ok := r.players[claim.PlayerID]
+	if !ok {
+		return ErrNotFound
+	}
+	if player.Status != PlayerWaivers || player.TeamID != "" {
+		return errors.New("player is not on waivers")
+	}
 	for _, existing := range r.claims {
 		if existing.PlayerID == claim.PlayerID && existing.TeamID == claim.TeamID {
 			return errors.New("team already claimed player")
@@ -235,13 +255,14 @@ func (r *MemoryRepository) AwardWaiver(_ context.Context, claim WaiverClaim, con
 	if !ok {
 		return ErrNotFound
 	}
-	if player.TeamID != "" {
+	if player.Status != PlayerWaivers || player.TeamID != "" {
 		return errors.New("player is no longer on waivers")
 	}
 	if _, ok := r.claims[claim.ID]; !ok {
 		return ErrNotFound
 	}
 	player.TeamID = claim.TeamID
+	player.Status = PlayerRoster
 	r.players[player.ID] = player
 	r.contracts[player.ID] = contract
 	for id, existing := range r.claims {
@@ -267,10 +288,11 @@ func (r *MemoryRepository) DraftPlayer(_ context.Context, pick DraftPick, player
 	if !ok {
 		return ErrNotFound
 	}
-	if player.TeamID != "" {
-		return errors.New("prospect already drafted")
+	if player.Status != PlayerDraft || player.TeamID != "" {
+		return errors.New("player is not an available draft prospect")
 	}
 	player.TeamID = pick.TeamID
+	player.Status = PlayerRoster
 	r.players[player.ID] = player
 	r.contracts[player.ID] = contract
 	currentPick.TeamID = ""
@@ -306,13 +328,13 @@ func (r *MemoryRepository) ExecuteTrade(_ context.Context, execution TradeExecut
 	defer r.mu.Unlock()
 	for _, playerID := range execution.FromPlayerIDs {
 		player, ok := r.players[playerID]
-		if !ok || player.TeamID != execution.FromTeamID {
+		if !ok || player.TeamID != execution.FromTeamID || player.Status != PlayerRoster {
 			return errors.New("trade player ownership changed")
 		}
 	}
 	for _, playerID := range execution.ToPlayerIDs {
 		player, ok := r.players[playerID]
-		if !ok || player.TeamID != execution.ToTeamID {
+		if !ok || player.TeamID != execution.ToTeamID || player.Status != PlayerRoster {
 			return errors.New("trade player ownership changed")
 		}
 	}
