@@ -1,6 +1,22 @@
 export type GameEvent = { sequence:number; type:string; quarter:number; clock:number; description:string; yards?:number; scoring?:boolean };
 export type GameState = { id:string; seed:number; homeId:string; awayId:string; possession:string; quarter:number; clock:number; down:number; distance:number; ball:number; homeScore:number; awayScore:number; playNumber:number; finished:boolean };
 export type FourthDownAdvice = { kind:"go"|"field_goal"|"punt"; label:string; reason:string };
+export type CoachingMetrics = {
+  fourthDownDecisions:number;
+  fourthDownCorrect:number;
+  delayOfGames:number;
+  clockDecisions:number;
+  clockCorrect:number;
+  audibles:number;
+};
+export type CoachingGrade = {
+  overall:number;
+  decisionMaking:number;
+  discipline:number;
+  clockManagement:number;
+  samples:number;
+  summary:string[];
+};
 export type Simulation = {
   state: GameState;
   events: GameEvent[];
@@ -9,7 +25,10 @@ export type Simulation = {
   timeouts:number;
   hurryUp:boolean;
   fourthDown?:FourthDownAdvice;
+  metrics:CoachingMetrics;
+  grade:CoachingGrade;
 };
+export type CompleteSimulation = Pick<Simulation, "state" | "events">;
 export type PlaybookPlay = { id:string; name:string; side:"offense"|"defense"; formation:string; personnel:string; concept:string };
 export type Playbooks = { offense: PlaybookPlay[]; defense: PlaybookPlay[] };
 
@@ -34,7 +53,7 @@ export const api = {
     method:"POST",
     body:JSON.stringify({ action }),
   }),
-  simulate: (seed:number) => request<Simulation>(`/api/v1/demo/simulate?seed=${seed}`, { method:"POST" }),
+  simulate: (seed:number) => request<CompleteSimulation>(`/api/v1/demo/simulate?seed=${seed}`, { method:"POST" }),
   magicLink: (email:string) => request<{sent:boolean}>("/api/v1/auth/magic-link", { method:"POST", body:JSON.stringify({ email }) }),
   verify: (token:string) => request<{id:string;email:string}>("/api/v1/auth/verify", { method:"POST", body:JSON.stringify({ token }) }),
 };

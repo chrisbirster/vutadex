@@ -24,12 +24,13 @@ type Options struct {
 	Auth            *auth.Service
 	Hub             *realtime.Hub
 	ESPN            *espn.Provider
+	GameRepository  game.Repository
 }
 
 func New(web http.Handler, o Options) http.Handler {
 	mux := http.NewServeMux()
 	engine := simulation.New()
-	games := game.NewDemoStore(engine)
+	games := game.NewService(engine, o.GameRepository)
 	emailLimiter := auth.NewLimiter(5, 10*time.Minute)
 	ipLimiter := auth.NewLimiter(20, 10*time.Minute)
 
@@ -51,11 +52,15 @@ func New(web http.Handler, o Options) http.Handler {
 		jsonOut(w, http.StatusOK, map[string]any{"state": state, "events": events})
 	})
 	mux.HandleFunc("POST /api/v1/demo/games", func(w http.ResponseWriter, r *http.Request) {
-		created := games.Create(parseSeed(r, uint64(time.Now().UnixNano())))
+		created, err := games.Create(r.Context(), parseSeed(r, uint64(time.Now().UnixNano())))
+		if err != nil {
+			problem(w, http.StatusInternalServerError, "could not persist game")
+			return
+		}
 		jsonOut(w, http.StatusCreated, created)
 	})
 	mux.HandleFunc("GET /api/v1/demo/games/{gameID}", func(w http.ResponseWriter, r *http.Request) {
-		current, err := games.Get(r.PathValue("gameID"))
+		current, err := games.Get(r.Context(), r.PathValue("gameID"))
 		if err != nil {
 			gameProblem(w, err)
 			return
@@ -68,7 +73,7 @@ func New(web http.Handler, o Options) http.Handler {
 			problem(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		current, newEvents, err := games.CallDecision(r.PathValue("gameID"), in)
+		current, newEvents, err := games.CallDecision(r.Context(), r.PathValue("gameID"), in)
 		if err != nil {
 			gameProblem(w, err)
 			return
@@ -86,7 +91,7 @@ func New(web http.Handler, o Options) http.Handler {
 			problem(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		current, event, err := games.Action(r.PathValue("gameID"), in.Action)
+		current, event, err := games.Action(r.Context(), r.PathValue("gameID"), in.Action)
 		if err != nil {
 			gameProblem(w, err)
 			return

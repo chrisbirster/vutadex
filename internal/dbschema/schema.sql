@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS games (
   home_score integer NOT NULL DEFAULT 0,
   away_score integer NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS coach_games (
+  id text PRIMARY KEY,
+  user_id text REFERENCES users(id) ON DELETE SET NULL,
+  engine_version text NOT NULL,
+  seed bigint NOT NULL,
+  status text NOT NULL CHECK(status IN ('in_progress','final')),
+  snapshot jsonb NOT NULL,
+  grade jsonb NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS coach_games_status_updated_idx ON coach_games(status, updated_at DESC);
 CREATE TABLE IF NOT EXISTS drives (
   id text PRIMARY KEY,
   game_id text NOT NULL REFERENCES games(id) ON DELETE CASCADE,

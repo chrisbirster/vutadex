@@ -309,7 +309,26 @@ function GameHome() {
           </div>
 
           <aside {...stylex.attrs(s.card)}>
-            <div {...stylex.attrs(s.kicker)}>PLAY-BY-PLAY</div>
+            <div {...stylex.attrs(s.kicker)}>COACH REPORT</div>
+            <Show
+              when={(game()?.grade.samples ?? 0) > 0 || game()?.state.finished}
+              fallback={<p {...stylex.attrs(s.muted)}>Situational coaching grades appear after the first gradeable decision.</p>}
+            >
+              <p>
+                <strong>{game()!.grade.samples > 0 ? `${game()!.grade.overall}/100` : "No graded samples"}</strong>
+              </p>
+              <p {...stylex.attrs(s.muted)}>
+                Decisions {game()!.grade.decisionMaking} · Discipline {game()!.grade.discipline} · Clock {game()!.grade.clockManagement} · Samples {game()!.grade.samples}
+              </p>
+              <For each={game()!.grade.summary}>
+                {(note) => <div {...stylex.attrs(s.play)}>{note}</div>}
+              </For>
+              <Show when={game()!.metrics.audibles > 0}>
+                <p {...stylex.attrs(s.muted)}>Audibles recorded: {game()!.metrics.audibles}</p>
+              </Show>
+            </Show>
+
+            <div {...stylex.attrs(s.kicker)} style={{ "margin-top": "24px" }}>PLAY-BY-PLAY</div>
             <p {...stylex.attrs(s.muted)}>
               Snap calls, audibles, timeouts, tempo changes and play-clock enforcement are semantic server events. The same stream can later drive multiplayer spectators and the Dex replay history.
             </p>
