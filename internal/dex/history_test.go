@@ -34,7 +34,9 @@ func TestCareerAwardsRecordsAndHallOfFame(t *testing.T) {
 	if len(awards) != 3 { t.Fatalf("awards=%d", len(awards)) }
 	winners := map[string]string{}
 	for _, award := range awards { winners[award.Name] = award.PlayerID }
-	if winners["MVP"] != "qb" || winners["Offensive Player of the Year"] != "qb" || winners["Defensive Player of the Year"] != "lb" {
+	// MVP uses the published combined production score. This deliberately allows
+	// a historically dominant defender to win rather than forcing a QB winner.
+	if winners["MVP"] != "lb" || winners["Offensive Player of the Year"] != "qb" || winners["Defensive Player of the Year"] != "lb" {
 		t.Fatalf("unexpected awards: %#v", winners)
 	}
 
