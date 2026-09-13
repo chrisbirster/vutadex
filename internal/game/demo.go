@@ -12,9 +12,13 @@ import (
 	"github.com/chrisbirster/vutadex/internal/football/simulation"
 )
 
+const playClockDuration = 40 * time.Second
+
 type Demo struct {
-	State  model.GameState `json:"state"`
-	Events []model.Event   `json:"events"`
+	State        model.GameState `json:"state"`
+	Events       []model.Event   `json:"events"`
+	PlayDeadline time.Time       `json:"playDeadline"`
+	PlayClock    int             `json:"playClock"`
 }
 
 type DemoStore struct {
@@ -32,11 +36,11 @@ func (s *DemoStore) Create(seed uint64) Demo {
 	id := fmt.Sprintf("demo_%x_%x", time.Now().UnixMilli(), s.nextID.Add(1))
 	state := simulation.NewGame(id, "team-x", "team-o", seed)
 	state.Possession = state.HomeID
-	game := &Demo{State: state}
+	game := &Demo{State: state, PlayDeadline: time.Now().Add(playClockDuration)}
 	s.mu.Lock()
 	s.games[id] = game
 	s.mu.Unlock()
-	return cloneDemo(game)
+	return cloneDemo(game, time.Now())
 }
 
 func (s *DemoStore) Get(id string) (Demo, error) {
@@ -46,7 +50,7 @@ func (s *DemoStore) Get(id string) (Demo, error) {
 	if game == nil {
 		return Demo{}, errors.New("game not found")
 	}
-	return cloneDemo(game), nil
+	return cloneDemo(game, time.Now()), nil
 }
 
 func (s *DemoStore) Play(id string, call simulation.Call) (Demo, model.Event, error) {
@@ -57,23 +61,18 @@ func (s *DemoStore) Play(id string, call simulation.Call) (Demo, model.Event, er
 		return Demo{}, model.Event{}, errors.New("game not found")
 	}
 	if game.State.Finished {
-		return cloneDemo(game), model.Event{}, errors.New("game is final")
+		return cloneDemo(game, time.Now()), model.Event{}, errors.New("game is final")
 	}
 	event := s.engine.Play(&game.State, call)
 	game.Events = append(game.Events, event)
-	return cloneDemo(game), event, nil
+	resetPlayClock(game, time.Now())
+	return cloneDemo(game, time.Now()), event, nil
 }
 
-// CallPlay applies one human offensive play and, when possession changes, lets
-// the transparent CPU finish its possession before control returns to Team X.
-// This keeps the first Coach Mode slice focused on offensive play-calling while
-// defense remains a later milestone.
+// CallPlay applies one human coaching decision. Team X calls its offensive play
+// when it owns possession and calls a defensive concept against the CPU offense
+// when Team O owns possession. The server owns the play deadline on both sides.
 func (s *DemoStore) CallPlay(id, playID string) (Demo, []model.Event, error) {
-	call, err := resolvePlay(playID)
-	if err != nil {
-		return Demo{}, nil, err
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	game := s.games[id]
@@ -81,32 +80,66 @@ func (s *DemoStore) CallPlay(id, playID string) (Demo, []model.Event, error) {
 		return Demo{}, nil, errors.New("game not found")
 	}
 	if game.State.Finished {
-		return cloneDemo(game), nil, errors.New("game is final")
-	}
-	if game.State.Possession != game.State.HomeID {
-		return cloneDemo(game), nil, errors.New("waiting for opponent possession")
+		return cloneDemo(game, time.Now()), nil, errors.New("game is final")
 	}
 
-	newEvents := make([]model.Event, 0, 12)
-	event := s.engine.Play(&game.State, call)
-	game.Events = append(game.Events, event)
-	newEvents = append(newEvents, event)
-
-	for snaps := 0; !game.State.Finished && game.State.Possession != game.State.HomeID && snaps < 80; snaps++ {
-		event = s.engine.Play(&game.State, cpuCall(game.State))
+	now := time.Now()
+	if !game.PlayDeadline.IsZero() && !now.Before(game.PlayDeadline) {
+		event := s.expirePlayClock(game)
 		game.Events = append(game.Events, event)
-		newEvents = append(newEvents, event)
+		resetPlayClock(game, now)
+		return cloneDemo(game, now), []model.Event{event}, nil
 	}
 
-	return cloneDemo(game), newEvents, nil
+	var event model.Event
+	if game.State.Possession == game.State.HomeID {
+		call, name, err := resolveOffense(playID)
+		if err != nil {
+			return Demo{}, nil, err
+		}
+		event = s.engine.Play(&game.State, call)
+		event.Description = name + " — " + event.Description
+	} else {
+		defense, name, err := resolveDefense(playID)
+		if err != nil {
+			return Demo{}, nil, err
+		}
+		event = s.engine.PlayAgainst(&game.State, cpuCall(game.State), defense)
+		event.Description = name + " vs CPU — " + event.Description
+	}
+
+	game.Events = append(game.Events, event)
+	resetPlayClock(game, now)
+	return cloneDemo(game, now), []model.Event{event}, nil
 }
 
-func resolvePlay(id string) (simulation.Call, error) {
+func (s *DemoStore) expirePlayClock(game *Demo) model.Event {
+	if game.State.Possession == game.State.HomeID {
+		game.State.Ball -= 5
+		if game.State.Ball < 1 {
+			game.State.Ball = 1
+		}
+		game.State.Distance += 5
+		return model.Event{
+			Sequence:    len(game.Events) + 1,
+			Type:        "penalty",
+			Quarter:     game.State.Quarter,
+			Clock:       game.State.Clock,
+			Description: "Delay of game — Team X, 5 yards",
+		}
+	}
+
+	event := s.engine.PlayAgainst(&game.State, cpuCall(game.State), simulation.DefenseZone)
+	event.Description = "Play clock expired — default Cover 3 vs CPU — " + event.Description
+	return event
+}
+
+func resolveOffense(id string) (simulation.Call, string, error) {
 	switch id {
 	case "special-punt":
-		return simulation.Punt, nil
+		return simulation.Punt, "Punt", nil
 	case "special-field-goal":
-		return simulation.FieldGoal, nil
+		return simulation.FieldGoal, "Field Goal", nil
 	}
 	for _, play := range playbook.OffenseCore {
 		if play.ID != id {
@@ -114,16 +147,37 @@ func resolvePlay(id string) (simulation.Call, error) {
 		}
 		switch play.Concept {
 		case "inside-zone", "counter", "wide-zone", "option", "power":
-			return simulation.Run, nil
+			return simulation.Run, play.Name, nil
 		case "mesh", "stick", "spacing":
-			return simulation.ShortPass, nil
+			return simulation.ShortPass, play.Name, nil
 		case "verticals", "play-action":
-			return simulation.DeepPass, nil
+			return simulation.DeepPass, play.Name, nil
 		default:
-			return "", fmt.Errorf("play %s has unsupported concept %s", play.ID, play.Concept)
+			return "", "", fmt.Errorf("play %s has unsupported concept %s", play.ID, play.Concept)
 		}
 	}
-	return "", fmt.Errorf("unknown offensive play %q", id)
+	return "", "", fmt.Errorf("unknown offensive play %q", id)
+}
+
+func resolveDefense(id string) (simulation.Defense, string, error) {
+	for _, play := range playbook.DefenseCore {
+		if play.ID != id {
+			continue
+		}
+		switch play.Concept {
+		case "cover-1", "cover-2-man":
+			return simulation.DefenseMan, play.Name, nil
+		case "cover-2", "cover-3", "quarters":
+			return simulation.DefenseZone, play.Name, nil
+		case "blitz", "zone-blitz":
+			return simulation.DefenseBlitz, play.Name, nil
+		case "run-blitz":
+			return simulation.DefenseRunFit, play.Name, nil
+		default:
+			return "", "", fmt.Errorf("defensive play %s has unsupported concept %s", play.ID, play.Concept)
+		}
+	}
+	return "", "", fmt.Errorf("unknown defensive play %q", id)
 }
 
 func cpuCall(state model.GameState) simulation.Call {
@@ -142,8 +196,27 @@ func cpuCall(state model.GameState) simulation.Call {
 	return simulation.ShortPass
 }
 
-func cloneDemo(in *Demo) Demo {
-	out := Demo{State: in.State}
+func resetPlayClock(game *Demo, now time.Time) {
+	if game.State.Finished {
+		game.PlayDeadline = time.Time{}
+		return
+	}
+	game.PlayDeadline = now.Add(playClockDuration)
+}
+
+func cloneDemo(in *Demo, now time.Time) Demo {
+	out := Demo{State: in.State, PlayDeadline: in.PlayDeadline}
 	out.Events = append([]model.Event(nil), in.Events...)
+	if !in.State.Finished && !in.PlayDeadline.IsZero() {
+		remaining := int(time.Until(in.PlayDeadline).Seconds()) + 1
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining > int(playClockDuration/time.Second) {
+			remaining = int(playClockDuration / time.Second)
+		}
+		out.PlayClock = remaining
+	}
+	_ = now
 	return out
 }
