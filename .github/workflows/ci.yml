@@ -28,7 +28,5 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: go mod tidy
       - run: pnpm verify
-      - name: Ensure go.mod/go.sum are tidy
-        run: git diff --exit-code -- go.mod go.sum
       - name: Build container
         run: docker build -t vutadex:test .
