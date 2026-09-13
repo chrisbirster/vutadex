@@ -13,6 +13,7 @@ import (
 
 	"github.com/chrisbirster/vutadex/internal/auth"
 	"github.com/chrisbirster/vutadex/internal/database"
+	"github.com/chrisbirster/vutadex/internal/football/simulation"
 	"github.com/chrisbirster/vutadex/internal/franchise"
 	"github.com/chrisbirster/vutadex/internal/franchisehttp"
 	"github.com/chrisbirster/vutadex/internal/game"
@@ -20,6 +21,8 @@ import (
 	"github.com/chrisbirster/vutadex/internal/lifecyclehttp"
 	"github.com/chrisbirster/vutadex/internal/live/espn"
 	"github.com/chrisbirster/vutadex/internal/realtime"
+	"github.com/chrisbirster/vutadex/internal/season"
+	"github.com/chrisbirster/vutadex/internal/seasonhttp"
 	webapp "github.com/chrisbirster/vutadex/internal/web"
 )
 
@@ -44,6 +47,7 @@ func main() {
 	var gameRepo game.Repository
 	var franchiseRepo franchise.Repository
 	var lifecycleRepo franchise.LifecycleRepository
+	var seasonRepo season.Repository
 	var franchiseAccess franchise.Authorizer
 	if db != nil {
 		authStore = auth.NewPostgresStore(db)
@@ -51,6 +55,7 @@ func main() {
 		postgresFranchise := franchise.NewPostgresRepository(db)
 		franchiseRepo = postgresFranchise
 		lifecycleRepo = postgresFranchise
+		seasonRepo = season.NewPostgresRepository(db)
 		franchiseAccess = franchise.NewPostgresAuthorizer(db)
 	} else {
 		authStore = auth.NewMemoryStore()
@@ -58,6 +63,7 @@ func main() {
 		memoryFranchise := franchise.NewMemoryRepository()
 		franchiseRepo = memoryFranchise
 		lifecycleRepo = franchise.NewMemoryLifecycleRepository(memoryFranchise)
+		seasonRepo = season.NewMemoryRepository()
 		franchiseAccess = franchise.AllowAllAuthorizer{}
 	}
 
@@ -69,6 +75,7 @@ func main() {
 	authService := auth.NewService(authStore, sender, gameOrigin)
 	franchiseService := franchise.NewService(franchiseRepo, franchise.DefaultSalaryCap)
 	lifecycleService := franchise.NewLifecycleService(lifecycleRepo)
+	seasonService := season.NewService(seasonRepo, simulation.New())
 	hub := realtime.New(hostPattern(gameOrigin), hostPattern(marketingOrigin), "localhost:5173", "127.0.0.1:5173")
 
 	webAndFranchise := franchisehttp.New(webapp.Handler(), franchisehttp.Options{
@@ -81,7 +88,12 @@ func main() {
 		Access:  franchiseAccess,
 		Auth:    authService,
 	})
-	handler := httpapi.New(webAndLifecycle, httpapi.Options{
+	webAndSeasons := seasonhttp.New(webAndLifecycle, seasonhttp.Options{
+		Service: seasonService,
+		Access:  franchiseAccess,
+		Auth:    authService,
+	})
+	handler := httpapi.New(webAndSeasons, httpapi.Options{
 		MarketingOrigin: marketingOrigin,
 		GameOrigin:      gameOrigin,
 		CookieSecure:    env("VUTADEX_COOKIE_SECURE", "0") == "1",
