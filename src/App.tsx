@@ -244,7 +244,7 @@ function GameHome() {
                       type="button"
                       {...stylex.attrs(s.button, s.ghost)}
                       disabled={!canAct()}
-                      aria-pressed={selectedPlay()?.id === play.id}
+                      aria-pressed={selectedPlay()?.id === play.id ? "true" : "false"}
                       onClick={() => choose(play)}
                       title={`${play.formation} · ${play.personnel} personnel · ${play.concept}`}
                     >
@@ -267,7 +267,7 @@ function GameHome() {
                         type="button"
                         {...stylex.attrs(s.button, s.ghost)}
                         disabled={!canAct()}
-                        aria-pressed={selectedPlay()?.id === play.id}
+                        aria-pressed={selectedPlay()?.id === play.id ? "true" : "false"}
                         onClick={() => choose(play)}
                       >
                         {selectedPlay()?.id === play.id ? "✓ " : ""}{play.name}
