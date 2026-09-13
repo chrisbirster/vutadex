@@ -77,6 +77,7 @@ const (
 	PlayerFreeAgent PlayerStatus = "free_agent"
 	PlayerWaivers   PlayerStatus = "waivers"
 	PlayerDraft     PlayerStatus = "draft"
+	PlayerRetired   PlayerStatus = "retired"
 )
 
 type PlayerAsset struct {
