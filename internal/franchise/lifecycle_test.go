@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestScoutNarrowsRangesWithoutReturningTrueRatings(t *testing.T) {
+func TestScoutTightensUncertaintyWithoutReturningTrueRatings(t *testing.T) {
 	base := NewMemoryRepository()
 	base.SeedPlayer(PlayerAsset{ID: "p1", LeagueID: "lg", Status: PlayerDraft, FirstName: "Ada", LastName: "Blitz", Position: "QB", Age: 22, Overall: 81, Potential: 93})
 	life := NewMemoryLifecycleRepository(base)
@@ -28,10 +28,9 @@ func TestScoutNarrowsRangesWithoutReturningTrueRatings(t *testing.T) {
 	if last.Report.Observations != 6 {
 		t.Fatalf("observations=%d", last.Report.Observations)
 	}
-	firstWidth := first.Report.OverallHigh - first.Report.OverallLow
 	lastWidth := last.Report.OverallHigh - last.Report.OverallLow
-	if lastWidth > firstWidth {
-		t.Fatalf("expected scouting range to tighten: first=%d last=%d", firstWidth, lastWidth)
+	if lastWidth > 8 {
+		t.Fatalf("expected six observations to produce a tight overall range, got width=%d", lastWidth)
 	}
 	if last.Report.OverallLow > 81 || last.Report.OverallHigh < 81 || last.Report.PotentialLow > 93 || last.Report.PotentialHigh < 93 {
 		t.Fatalf("true ratings should remain inside the uncertainty ranges: %#v", last.Report)
