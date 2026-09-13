@@ -2,6 +2,7 @@ package game
 
 import (
 	"testing"
+	"time"
 
 	"github.com/chrisbirster/vutadex/internal/football/simulation"
 )
@@ -12,6 +13,9 @@ func TestDemoStorePlaysOneSnap(t *testing.T) {
 	if game.State.Possession != game.State.HomeID {
 		t.Fatalf("expected Team X to open on offense, got possession %q", game.State.Possession)
 	}
+	if game.PlayClock < 39 || game.PlayClock > 40 {
+		t.Fatalf("expected fresh 40 second play clock, got %d", game.PlayClock)
+	}
 	next, event, err := store.Play(game.State.ID, simulation.Run)
 	if err != nil {
 		t.Fatal(err)
@@ -21,37 +25,60 @@ func TestDemoStorePlaysOneSnap(t *testing.T) {
 	}
 }
 
-func TestDemoStoreResolvesPlaybookConcept(t *testing.T) {
+func TestDemoStoreResolvesOffensivePlaybookConcept(t *testing.T) {
 	store := NewDemoStore(simulation.New())
 	game := store.Create(42)
 	next, events, err := store.CallPlay(game.State.ID, "gun-doubles-inside-zone")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) == 0 || next.State.PlayNumber == 0 {
-		t.Fatalf("expected a resolved playbook snap, got %#v", next)
+	if len(events) != 1 || next.State.PlayNumber == 0 {
+		t.Fatalf("expected one resolved offensive snap, got %#v", next)
 	}
 }
 
-func TestDemoStoreRunsCPUDriveAfterPossessionChange(t *testing.T) {
+func TestDemoStoreAcceptsDefensiveCallAfterPunt(t *testing.T) {
 	store := NewDemoStore(simulation.New())
 	game := store.Create(7)
-	next, events, err := store.CallPlay(game.State.ID, "special-punt")
+	defending, _, err := store.CallPlay(game.State.ID, "special-punt")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) < 2 {
-		t.Fatalf("expected punt plus CPU possession, got %d events", len(events))
+	if defending.State.Possession != defending.State.AwayID {
+		t.Fatalf("expected CPU offense after punt, got possession %q", defending.State.Possession)
 	}
-	if !next.State.Finished && next.State.Possession != next.State.HomeID {
-		t.Fatalf("expected control to return to Team X, got possession %q", next.State.Possession)
+	next, events, err := store.CallPlay(game.State.ID, "nickel-cover-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || next.State.PlayNumber <= defending.State.PlayNumber {
+		t.Fatalf("expected one CPU snap against selected defense, got %#v", next)
 	}
 }
 
-func TestDemoStoreRejectsUnknownPlay(t *testing.T) {
+func TestDemoStoreAssessesDelayOfGame(t *testing.T) {
 	store := NewDemoStore(simulation.New())
 	game := store.Create(99)
-	if _, _, err := store.CallPlay(game.State.ID, "not-a-play"); err == nil {
-		t.Fatal("expected unknown play to fail")
+	store.mu.Lock()
+	store.games[game.State.ID].PlayDeadline = time.Now().Add(-time.Second)
+	store.mu.Unlock()
+
+	next, events, err := store.CallPlay(game.State.ID, "gun-trips-mesh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "penalty" {
+		t.Fatalf("expected delay-of-game event, got %#v", events)
+	}
+	if next.State.Ball != 20 || next.State.Distance != 15 || next.State.PlayNumber != 0 {
+		t.Fatalf("unexpected delay-of-game state: %#v", next.State)
+	}
+}
+
+func TestDemoStoreRejectsWrongSidePlay(t *testing.T) {
+	store := NewDemoStore(simulation.New())
+	game := store.Create(11)
+	if _, _, err := store.CallPlay(game.State.ID, "nickel-cover-3"); err == nil {
+		t.Fatal("expected defensive call to fail while Team X is on offense")
 	}
 }
