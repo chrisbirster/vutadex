@@ -37,6 +37,8 @@ type Demo struct {
 	Timeouts     int             `json:"timeouts"`
 	HurryUp      bool            `json:"hurryUp"`
 	FourthDown   *Advice         `json:"fourthDown,omitempty"`
+	Metrics      CoachingMetrics `json:"metrics"`
+	Grade        CoachingGrade   `json:"grade"`
 }
 
 type DemoStore struct {
@@ -61,6 +63,17 @@ func (s *DemoStore) Create(seed uint64) Demo {
 	s.games[id] = game
 	s.mu.Unlock()
 	return cloneDemo(game, now)
+}
+
+func (s *DemoStore) Restore(snapshot Demo) Demo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	snapshot.FourthDown = nil
+	snapshot.Grade = CoachingGrade{}
+	resetPlayClock(&snapshot, now)
+	s.games[snapshot.State.ID] = &snapshot
+	return cloneDemo(&snapshot, now)
 }
 
 func (s *DemoStore) Get(id string) (Demo, error) {
@@ -114,6 +127,9 @@ func (s *DemoStore) CallDecision(id string, decision Decision) (Demo, []model.Ev
 	now := time.Now()
 	beforeQuarter := game.State.Quarter
 	if !game.PlayDeadline.IsZero() && !now.Before(game.PlayDeadline) {
+		if game.State.Possession == game.State.HomeID {
+			game.Metrics.DelayOfGames++
+		}
 		event := s.expirePlayClock(game)
 		appendEvent(game, &event)
 		resetTimeoutsAtHalftime(game, beforeQuarter)
@@ -123,6 +139,9 @@ func (s *DemoStore) CallDecision(id string, decision Decision) (Demo, []model.Ev
 
 	decision.PlayID = strings.TrimSpace(decision.PlayID)
 	decision.AudibleFrom = strings.TrimSpace(decision.AudibleFrom)
+	if decision.AudibleFrom != "" && decision.AudibleFrom != decision.PlayID {
+		game.Metrics.Audibles++
+	}
 	var event model.Event
 
 	if game.State.Possession == game.State.HomeID {
@@ -134,6 +153,8 @@ func (s *DemoStore) CallDecision(id string, decision Decision) (Demo, []model.Ev
 		if err != nil {
 			return Demo{}, nil, err
 		}
+		recordFourthDown(game, decision.PlayID)
+		recordClockPlay(game, decision.PlayID)
 		event = s.engine.Play(&game.State, call)
 		event.Description = prefix + event.Description
 	} else {
@@ -178,6 +199,9 @@ func (s *DemoStore) Action(id, action string) (Demo, model.Event, error) {
 		event.Type = "timeout"
 		event.Description = fmt.Sprintf("Team X timeout — %d remaining", game.Timeouts)
 	case "hurry_up_on":
+		if !game.HurryUp {
+			recordHurryUp(game)
+		}
 		game.HurryUp = true
 		event.Description = "Team X enters hurry-up tempo"
 	case "hurry_up_off":
@@ -348,6 +372,8 @@ func cloneDemo(in *Demo, now time.Time) Demo {
 		Timeouts:     in.Timeouts,
 		HurryUp:      in.HurryUp,
 		FourthDown:   fourthDownAdvice(in.State),
+		Metrics:      in.Metrics,
+		Grade:        grade(in.Metrics),
 	}
 	out.Events = append([]model.Event(nil), in.Events...)
 	if !in.State.Finished && !in.PlayDeadline.IsZero() {
