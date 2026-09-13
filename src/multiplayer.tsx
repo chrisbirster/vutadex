@@ -124,7 +124,9 @@ export function MultiplayerRoom() {
     setBusy(true);
     setError("");
     try {
-      const [me, books, catchUp] = await Promise.all([api.session(), api.playbooks(), api.room(params.roomId, 0)]);
+      const roomID = params.roomId;
+      if (!roomID) throw new Error("Room ID is missing from the route");
+      const [me, books, catchUp] = await Promise.all([api.session(), api.playbooks(), api.room(roomID, 0)]);
       setSession(me);
       setOffensePlays(books.offense);
       setDefensePlays(books.defense);
