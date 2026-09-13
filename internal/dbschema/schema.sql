@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS players (
   id text PRIMARY KEY,
   league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   team_id text REFERENCES teams(id) ON DELETE SET NULL,
+  roster_status text NOT NULL DEFAULT 'roster' CHECK(roster_status IN ('roster','free_agent','waivers','draft')),
   first_name text NOT NULL,
   last_name text NOT NULL,
   position text NOT NULL,
@@ -58,9 +59,11 @@ CREATE TABLE IF NOT EXISTS players (
   overall integer NOT NULL,
   potential integer NOT NULL,
   attributes jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK((roster_status = 'roster' AND team_id IS NOT NULL) OR (roster_status <> 'roster' AND team_id IS NULL))
 );
 CREATE INDEX IF NOT EXISTS players_league_team_idx ON players(league_id,team_id);
+CREATE INDEX IF NOT EXISTS players_league_status_idx ON players(league_id,roster_status,overall DESC);
 CREATE TABLE IF NOT EXISTS contracts (
   id text PRIMARY KEY,
   league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
