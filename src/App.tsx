@@ -93,7 +93,8 @@ function GameHome() {
   const params = useParams();
   const navigate = useNavigate();
   const [game, setGame] = createSignal<Simulation>();
-  const [plays, setPlays] = createSignal<PlaybookPlay[]>([]);
+  const [offensePlays, setOffensePlays] = createSignal<PlaybookPlay[]>([]);
+  const [defensePlays, setDefensePlays] = createSignal<PlaybookPlay[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
 
@@ -102,7 +103,8 @@ function GameHome() {
     setError("");
     try {
       const books = await api.playbooks();
-      setPlays(books.offense);
+      setOffensePlays(books.offense);
+      setDefensePlays(books.defense);
       if (params.id) {
         setGame(await api.game(params.id));
       } else {
@@ -145,10 +147,12 @@ function GameHome() {
 
   void bootstrap();
 
-  const canCall = () => {
+  const isOffense = () => {
     const state = game()?.state;
-    return Boolean(state && !state.finished && state.possession === state.homeId && !busy());
+    return Boolean(state && state.possession === state.homeId);
   };
+  const currentPlays = () => isOffense() ? offensePlays() : defensePlays();
+  const canCall = () => Boolean(game() && !game()!.state.finished && !busy());
 
   return (
     <>
@@ -157,19 +161,19 @@ function GameHome() {
         <div {...stylex.attrs(s.score)}>
           <div>
             <div {...stylex.attrs(s.team)}>TEAM X</div>
-            <div {...stylex.attrs(s.muted)}>Coach: You</div>
+            <div {...stylex.attrs(s.muted)}>Coach: You · {isOffense() ? "OFFENSE" : "DEFENSE"}</div>
           </div>
           <div {...stylex.attrs(s.center)}>
             <strong>{game()?.state.homeScore ?? 0} — {game()?.state.awayScore ?? 0}</strong>
             <div {...stylex.attrs(s.muted)}>
               <Show when={game()} fallback="LOADING COACH MODE">
-                Q{game()!.state.quarter} {formatClock(game()!.state.clock)} · {downAndDistance(game()!.state.down, game()!.state.distance)} · {fieldPosition(game()!.state.ball)}
+                Q{game()!.state.quarter} {formatClock(game()!.state.clock)} · {downAndDistance(game()!.state.down, game()!.state.distance)} · {fieldPosition(game()!.state.ball)} · PLAY {game()!.playClock}s
               </Show>
             </div>
           </div>
           <div style={{ "text-align": "right" }}>
             <div {...stylex.attrs(s.team)}>TEAM O</div>
-            <div {...stylex.attrs(s.muted)}>CPU</div>
+            <div {...stylex.attrs(s.muted)}>CPU · {isOffense() ? "DEFENSE" : "OFFENSE"}</div>
           </div>
         </div>
 
@@ -181,12 +185,14 @@ function GameHome() {
           <div>
             <XOField />
             <section {...stylex.attrs(s.card)} style={{ "margin-top": "18px" }}>
-              <div {...stylex.attrs(s.kicker)}>OFFENSIVE PLAY CALL</div>
+              <div {...stylex.attrs(s.kicker)}>{isOffense() ? "OFFENSIVE PLAY CALL" : "DEFENSIVE PLAY CALL"}</div>
               <p {...stylex.attrs(s.muted)}>
-                Choose a VutaDex concept. When your possession ends, the CPU runs its drive through the same deterministic engine and returns control to Team X.
+                {isOffense()
+                  ? "Choose a VutaDex offensive concept. Scoring, punts, and turnovers switch you to the defensive playbook."
+                  : "Choose the coverage or pressure for this snap. Your call changes the CPU offense's deterministic matchup odds."}
               </p>
               <div {...stylex.attrs(s.actions)}>
-                <For each={plays()}>
+                <For each={currentPlays()}>
                   {(play) => (
                     <button
                       type="button"
@@ -200,9 +206,13 @@ function GameHome() {
                   )}
                 </For>
               </div>
+              <Show when={isOffense()}>
+                <div {...stylex.attrs(s.actions)} style={{ "margin-top": "12px" }}>
+                  <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-punt")}>Punt</button>
+                  <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-field-goal")}>Field goal</button>
+                </div>
+              </Show>
               <div {...stylex.attrs(s.actions)} style={{ "margin-top": "12px" }}>
-                <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-punt")}>Punt</button>
-                <button type="button" {...stylex.attrs(s.button)} disabled={!canCall()} onClick={() => call("special-field-goal")}>Field goal</button>
                 <button type="button" {...stylex.attrs(s.button, s.ghost)} disabled={busy()} onClick={() => void newGame()}>New game</button>
               </div>
               <Show when={game()?.state.finished}>
@@ -214,7 +224,7 @@ function GameHome() {
           <aside {...stylex.attrs(s.card)}>
             <div {...stylex.attrs(s.kicker)}>PLAY-BY-PLAY</div>
             <p {...stylex.attrs(s.muted)}>
-              Game state is owned by the Go server. Each button advances exactly one human snap; opponent snaps are clearly listed in the same event stream.
+              The Go server owns possession, matchup resolution, and the play deadline. An expired offensive clock is delay-of-game; an expired defensive clock falls back to Cover 3 for the CPU snap.
             </p>
             <div {...stylex.attrs(s.feed)} style={{ "margin-top": "18px" }}>
               <For each={game()?.events.slice().reverse() ?? []}>
