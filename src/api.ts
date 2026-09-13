@@ -31,6 +31,35 @@ export type Simulation = {
 export type CompleteSimulation = Pick<Simulation, "state" | "events">;
 export type PlaybookPlay = { id:string; name:string; side:"offense"|"defense"; formation:string; personnel:string; concept:string };
 export type Playbooks = { offense: PlaybookPlay[]; defense: PlaybookPlay[] };
+export type AuthSession = { id:string; email:string };
+export type MultiplayerSide = "x"|"o";
+export type RoundState = { gameId:string; round:number; deadline:string; xLocked:boolean; oLocked:boolean };
+export type LobbySnapshot = {
+  id:string;
+  gameId:string;
+  ownerUserId:string;
+  guestUserId?:string;
+  winnerUserId?:string;
+  status:"waiting"|"ready"|"active"|"final"|"forfeited";
+  sequence:number;
+  round:RoundState;
+  createdAt:string;
+  updatedAt:string;
+};
+export type LobbySelection = { side:MultiplayerSide; formation:string; playId:string; lockedAt:string };
+export type LobbyResolution = { x:LobbySelection; o:LobbySelection; ready:boolean };
+export type LobbyEvent = {
+  sequence:number;
+  kind:string;
+  at:string;
+  side?:MultiplayerSide;
+  message:string;
+  resolution?:LobbyResolution;
+  game?:Simulation;
+  winnerUserId?:string;
+};
+export type LobbyCatchUp = { room:LobbySnapshot; events:LobbyEvent[] };
+export type LobbyCreate = { room:LobbySnapshot; inviteCode:string };
 
 async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, { ...init, headers: { "Content-Type":"application/json", ...(init?.headers ?? {}) } });
@@ -54,6 +83,15 @@ export const api = {
     body:JSON.stringify({ action }),
   }),
   simulate: (seed:number) => request<CompleteSimulation>(`/api/v1/demo/simulate?seed=${seed}`, { method:"POST" }),
+  session: () => request<AuthSession>("/api/v1/auth/session"),
+  createRoom: (seed:number) => request<LobbyCreate>(`/api/v1/rooms?seed=${seed}`, { method:"POST" }),
+  joinRoom: (inviteCode:string) => request<LobbyCatchUp>("/api/v1/rooms/join", { method:"POST", body:JSON.stringify({ inviteCode }) }),
+  room: (id:string, since = 0) => request<LobbyCatchUp>(`/api/v1/rooms/${encodeURIComponent(id)}?since=${since}`),
+  lockRoomCall: (id:string, formation:string, playId:string) => request<LobbyCatchUp>(`/api/v1/rooms/${encodeURIComponent(id)}/calls`, {
+    method:"POST",
+    body:JSON.stringify({ formation, playId }),
+  }),
+  forfeitRoom: (id:string) => request<LobbyCatchUp>(`/api/v1/rooms/${encodeURIComponent(id)}/forfeit`, { method:"POST" }),
   magicLink: (email:string) => request<{sent:boolean}>("/api/v1/auth/magic-link", { method:"POST", body:JSON.stringify({ email }) }),
   verify: (token:string) => request<{id:string;email:string}>("/api/v1/auth/verify", { method:"POST", body:JSON.stringify({ token }) }),
 };
