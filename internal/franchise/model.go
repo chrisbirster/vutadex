@@ -70,16 +70,26 @@ type Offer struct {
 	CreatedAt     time.Time   `json:"createdAt"`
 }
 
+type PlayerStatus string
+
+const (
+	PlayerRoster    PlayerStatus = "roster"
+	PlayerFreeAgent PlayerStatus = "free_agent"
+	PlayerWaivers   PlayerStatus = "waivers"
+	PlayerDraft     PlayerStatus = "draft"
+)
+
 type PlayerAsset struct {
-	ID        string `json:"id"`
-	LeagueID  string `json:"leagueId"`
-	TeamID    string `json:"teamId,omitempty"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-	Position  string `json:"position"`
-	Age       int    `json:"age"`
-	Overall   int    `json:"overall"`
-	Potential int    `json:"potential"`
+	ID        string       `json:"id"`
+	LeagueID  string       `json:"leagueId"`
+	TeamID    string       `json:"teamId,omitempty"`
+	Status    PlayerStatus `json:"status"`
+	FirstName string       `json:"firstName"`
+	LastName  string       `json:"lastName"`
+	Position  string       `json:"position"`
+	Age       int          `json:"age"`
+	Overall   int          `json:"overall"`
+	Potential int          `json:"potential"`
 }
 
 type WaiverClaim struct {
