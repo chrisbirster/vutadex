@@ -1,5 +1,5 @@
 import { createRouter, useNavigate, useParams, useSearchParams } from "@solidjs/router";
-import { For, Show, createSignal, onMount } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import * as stylex from "@stylexjs/stylex";
 import { api, type PlaybookPlay, type Simulation } from "./api";
 import { colors, s } from "./styles.stylex";
@@ -143,9 +143,7 @@ function GameHome() {
     }
   }
 
-  onMount(() => {
-    void bootstrap();
-  });
+  void bootstrap();
 
   const canCall = () => {
     const state = game()?.state;
