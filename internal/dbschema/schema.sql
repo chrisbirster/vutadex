@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS franchise_memberships (
 );
 CREATE TABLE IF NOT EXISTS players (
   id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   team_id text REFERENCES teams(id) ON DELETE SET NULL,
   first_name text NOT NULL,
   last_name text NOT NULL,
@@ -59,6 +60,67 @@ CREATE TABLE IF NOT EXISTS players (
   attributes jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS players_league_team_idx ON players(league_id,team_id);
+CREATE TABLE IF NOT EXISTS contracts (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  start_season integer NOT NULL,
+  years integer NOT NULL CHECK(years BETWEEN 1 AND 7),
+  annual_value bigint NOT NULL CHECK(annual_value > 0),
+  guaranteed bigint NOT NULL DEFAULT 0 CHECK(guaranteed >= 0),
+  signed_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(player_id)
+);
+CREATE INDEX IF NOT EXISTS contracts_team_idx ON contracts(team_id);
+CREATE TABLE IF NOT EXISTS draft_picks (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  original_team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  season integer NOT NULL,
+  round integer NOT NULL CHECK(round BETWEEN 1 AND 7),
+  pick integer NOT NULL CHECK(pick > 0),
+  used_player_id text REFERENCES players(id) ON DELETE SET NULL,
+  UNIQUE(league_id,season,round,pick)
+);
+CREATE INDEX IF NOT EXISTS draft_picks_team_season_idx ON draft_picks(team_id,season,round,pick);
+CREATE TABLE IF NOT EXISTS franchise_transactions (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  kind text NOT NULL CHECK(kind IN ('trade','signing','release','draft','waiver')),
+  team_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  player_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  pick_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  summary text NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS franchise_transactions_league_idx ON franchise_transactions(league_id,occurred_at DESC);
+CREATE TABLE IF NOT EXISTS trade_offers (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  from_team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  to_team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  from_player_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  to_player_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  from_pick_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  to_pick_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL CHECK(status IN ('open','accepted','rejected','expired')),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trade_offers_team_status_idx ON trade_offers(to_team_id,status,created_at DESC);
+CREATE TABLE IF NOT EXISTS waiver_claims (
+  id text PRIMARY KEY,
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  priority integer NOT NULL CHECK(priority > 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(player_id,team_id)
+);
+CREATE INDEX IF NOT EXISTS waiver_claims_league_player_idx ON waiver_claims(league_id,player_id,priority,created_at);
 CREATE TABLE IF NOT EXISTS games (
   id text PRIMARY KEY,
   league_id text REFERENCES leagues(id) ON DELETE CASCADE,
