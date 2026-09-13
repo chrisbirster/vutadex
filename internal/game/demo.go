@@ -30,13 +30,13 @@ type Decision struct {
 }
 
 type Demo struct {
-	State          model.GameState `json:"state"`
-	Events         []model.Event   `json:"events"`
-	PlayDeadline   time.Time       `json:"playDeadline"`
-	PlayClock      int             `json:"playClock"`
-	Timeouts       int             `json:"timeouts"`
-	HurryUp        bool            `json:"hurryUp"`
-	FourthDown     *Advice         `json:"fourthDown,omitempty"`
+	State        model.GameState `json:"state"`
+	Events       []model.Event   `json:"events"`
+	PlayDeadline time.Time       `json:"playDeadline"`
+	PlayClock    int             `json:"playClock"`
+	Timeouts     int             `json:"timeouts"`
+	HurryUp      bool            `json:"hurryUp"`
+	FourthDown   *Advice         `json:"fourthDown,omitempty"`
 }
 
 type DemoStore struct {
@@ -112,16 +112,17 @@ func (s *DemoStore) CallDecision(id string, decision Decision) (Demo, []model.Ev
 	}
 
 	now := time.Now()
+	beforeQuarter := game.State.Quarter
 	if !game.PlayDeadline.IsZero() && !now.Before(game.PlayDeadline) {
 		event := s.expirePlayClock(game)
 		appendEvent(game, &event)
+		resetTimeoutsAtHalftime(game, beforeQuarter)
 		resetPlayClock(game, now)
 		return cloneDemo(game, now), []model.Event{event}, nil
 	}
 
 	decision.PlayID = strings.TrimSpace(decision.PlayID)
 	decision.AudibleFrom = strings.TrimSpace(decision.AudibleFrom)
-	beforeQuarter := game.State.Quarter
 	var event model.Event
 
 	if game.State.Possession == game.State.HomeID {
