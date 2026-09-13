@@ -207,6 +207,60 @@ CREATE TABLE IF NOT EXISTS games (
   CHECK(home_team_id <> away_team_id)
 );
 CREATE INDEX IF NOT EXISTS games_league_season_week_idx ON games(league_id,season,week,phase,status);
+CREATE TABLE IF NOT EXISTS player_season_stats (
+  league_id text NOT NULL,
+  season integer NOT NULL,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  games integer NOT NULL DEFAULT 0 CHECK(games >= 0),
+  passing_yards bigint NOT NULL DEFAULT 0 CHECK(passing_yards >= 0),
+  passing_touchdowns bigint NOT NULL DEFAULT 0 CHECK(passing_touchdowns >= 0),
+  interceptions_thrown bigint NOT NULL DEFAULT 0 CHECK(interceptions_thrown >= 0),
+  rushing_yards bigint NOT NULL DEFAULT 0 CHECK(rushing_yards >= 0),
+  rushing_touchdowns bigint NOT NULL DEFAULT 0 CHECK(rushing_touchdowns >= 0),
+  receiving_yards bigint NOT NULL DEFAULT 0 CHECK(receiving_yards >= 0),
+  receiving_touchdowns bigint NOT NULL DEFAULT 0 CHECK(receiving_touchdowns >= 0),
+  tackles bigint NOT NULL DEFAULT 0 CHECK(tackles >= 0),
+  sacks bigint NOT NULL DEFAULT 0 CHECK(sacks >= 0),
+  defensive_interceptions bigint NOT NULL DEFAULT 0 CHECK(defensive_interceptions >= 0),
+  PRIMARY KEY(league_id,season,player_id),
+  FOREIGN KEY(league_id,season) REFERENCES seasons(league_id,season) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS player_season_stats_player_idx ON player_season_stats(league_id,player_id,season);
+CREATE TABLE IF NOT EXISTS player_awards (
+  id text PRIMARY KEY,
+  league_id text NOT NULL,
+  season integer NOT NULL,
+  name text NOT NULL,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  score bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY(league_id,season) REFERENCES seasons(league_id,season) ON DELETE CASCADE,
+  UNIQUE(league_id,season,name)
+);
+CREATE INDEX IF NOT EXISTS player_awards_player_idx ON player_awards(league_id,player_id,season);
+CREATE TABLE IF NOT EXISTS league_records (
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  scope text NOT NULL CHECK(scope IN ('season','career')),
+  category text NOT NULL,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  season integer,
+  value bigint NOT NULL CHECK(value >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(league_id,scope,category),
+  CHECK((scope='season' AND season IS NOT NULL) OR (scope='career' AND season IS NULL))
+);
+CREATE TABLE IF NOT EXISTS hall_of_fame (
+  league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  player_id text NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  inducted_season integer NOT NULL,
+  score bigint NOT NULL,
+  reason text NOT NULL,
+  inducted_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(league_id,player_id)
+);
+CREATE INDEX IF NOT EXISTS hall_of_fame_score_idx ON hall_of_fame(league_id,score DESC);
 CREATE TABLE IF NOT EXISTS coach_games (
   id text PRIMARY KEY,
   user_id text REFERENCES users(id) ON DELETE SET NULL,
@@ -253,7 +307,10 @@ CREATE TABLE IF NOT EXISTS dex_entries (
   league_id text NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
   kind text NOT NULL,
   subject_id text NOT NULL,
+  title text NOT NULL DEFAULT '',
+  summary text NOT NULL DEFAULT '',
   payload jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(league_id,kind,subject_id)
 );
+CREATE INDEX IF NOT EXISTS dex_entries_search_idx ON dex_entries(league_id,kind,title);
