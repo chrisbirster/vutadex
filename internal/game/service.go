@@ -55,11 +55,16 @@ func (s *Service) CallDecision(ctx context.Context, id string, decision Decision
 	if err := s.ensureLoaded(ctx, id); err != nil {
 		return Demo{}, nil, err
 	}
+	before, err := s.store.Get(id)
+	if err != nil {
+		return Demo{}, nil, err
+	}
 	current, events, err := s.store.CallDecision(id, decision)
 	if err != nil {
 		return Demo{}, nil, err
 	}
 	if err := s.save(ctx, current); err != nil {
+		s.store.Restore(before)
 		return Demo{}, nil, err
 	}
 	return current, events, nil
@@ -69,11 +74,16 @@ func (s *Service) Action(ctx context.Context, id, action string) (Demo, model.Ev
 	if err := s.ensureLoaded(ctx, id); err != nil {
 		return Demo{}, model.Event{}, err
 	}
+	before, err := s.store.Get(id)
+	if err != nil {
+		return Demo{}, model.Event{}, err
+	}
 	current, event, err := s.store.Action(id, action)
 	if err != nil {
 		return Demo{}, model.Event{}, err
 	}
 	if err := s.save(ctx, current); err != nil {
+		s.store.Restore(before)
 		return Demo{}, model.Event{}, err
 	}
 	return current, event, nil
@@ -107,6 +117,7 @@ func (r *MemoryRepository) Save(_ context.Context, current Demo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current.Events = append([]model.Event(nil), current.Events...)
+	current.Grade.Summary = append([]string(nil), current.Grade.Summary...)
 	r.games[current.State.ID] = current
 	return nil
 }
@@ -119,5 +130,6 @@ func (r *MemoryRepository) Load(_ context.Context, id string) (Demo, error) {
 		return Demo{}, ErrSnapshotNotFound
 	}
 	current.Events = append([]model.Event(nil), current.Events...)
+	current.Grade.Summary = append([]string(nil), current.Grade.Summary...)
 	return current, nil
 }
