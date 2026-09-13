@@ -28,6 +28,7 @@ export type Simulation = {
   metrics:CoachingMetrics;
   grade:CoachingGrade;
 };
+export type CompleteSimulation = Pick<Simulation, "state" | "events">;
 export type PlaybookPlay = { id:string; name:string; side:"offense"|"defense"; formation:string; personnel:string; concept:string };
 export type Playbooks = { offense: PlaybookPlay[]; defense: PlaybookPlay[] };
 
@@ -52,7 +53,7 @@ export const api = {
     method:"POST",
     body:JSON.stringify({ action }),
   }),
-  simulate: (seed:number) => request<Simulation>(`/api/v1/demo/simulate?seed=${seed}`, { method:"POST" }),
+  simulate: (seed:number) => request<CompleteSimulation>(`/api/v1/demo/simulate?seed=${seed}`, { method:"POST" }),
   magicLink: (email:string) => request<{sent:boolean}>("/api/v1/auth/magic-link", { method:"POST", body:JSON.stringify({ email }) }),
   verify: (token:string) => request<{id:string;email:string}>("/api/v1/auth/verify", { method:"POST", body:JSON.stringify({ token }) }),
 };
