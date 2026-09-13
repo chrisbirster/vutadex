@@ -1,6 +1,15 @@
 export type GameEvent = { sequence:number; type:string; quarter:number; clock:number; description:string; yards?:number; scoring?:boolean };
 export type GameState = { id:string; seed:number; homeId:string; awayId:string; possession:string; quarter:number; clock:number; down:number; distance:number; ball:number; homeScore:number; awayScore:number; playNumber:number; finished:boolean };
-export type Simulation = { state: GameState; events: GameEvent[]; playDeadline:string; playClock:number };
+export type FourthDownAdvice = { kind:"go"|"field_goal"|"punt"; label:string; reason:string };
+export type Simulation = {
+  state: GameState;
+  events: GameEvent[];
+  playDeadline:string;
+  playClock:number;
+  timeouts:number;
+  hurryUp:boolean;
+  fourthDown?:FourthDownAdvice;
+};
 export type PlaybookPlay = { id:string; name:string; side:"offense"|"defense"; formation:string; personnel:string; concept:string };
 export type Playbooks = { offense: PlaybookPlay[]; defense: PlaybookPlay[] };
 
@@ -17,7 +26,14 @@ export const api = {
   playbooks: () => request<Playbooks>("/api/v1/playbooks"),
   createGame: (seed:number) => request<Simulation>(`/api/v1/demo/games?seed=${seed}`, { method:"POST" }),
   game: (id:string) => request<Simulation>(`/api/v1/demo/games/${encodeURIComponent(id)}`),
-  callPlay: (id:string, playId:string) => request<Simulation>(`/api/v1/demo/games/${encodeURIComponent(id)}/plays`, { method:"POST", body:JSON.stringify({ playId }) }),
+  callPlay: (id:string, playId:string, audibleFrom = "") => request<Simulation>(`/api/v1/demo/games/${encodeURIComponent(id)}/plays`, {
+    method:"POST",
+    body:JSON.stringify({ playId, audibleFrom: audibleFrom || undefined }),
+  }),
+  coachingAction: (id:string, action:"timeout"|"hurry_up_on"|"hurry_up_off") => request<Simulation>(`/api/v1/demo/games/${encodeURIComponent(id)}/actions`, {
+    method:"POST",
+    body:JSON.stringify({ action }),
+  }),
   simulate: (seed:number) => request<Simulation>(`/api/v1/demo/simulate?seed=${seed}`, { method:"POST" }),
   magicLink: (email:string) => request<{sent:boolean}>("/api/v1/auth/magic-link", { method:"POST", body:JSON.stringify({ email }) }),
   verify: (token:string) => request<{id:string;email:string}>("/api/v1/auth/verify", { method:"POST", body:JSON.stringify({ token }) }),
