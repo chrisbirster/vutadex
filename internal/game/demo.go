@@ -36,11 +36,12 @@ func (s *DemoStore) Create(seed uint64) Demo {
 	id := fmt.Sprintf("demo_%x_%x", time.Now().UnixMilli(), s.nextID.Add(1))
 	state := simulation.NewGame(id, "team-x", "team-o", seed)
 	state.Possession = state.HomeID
-	game := &Demo{State: state, PlayDeadline: time.Now().Add(playClockDuration)}
+	now := time.Now()
+	game := &Demo{State: state, PlayDeadline: now.Add(playClockDuration)}
 	s.mu.Lock()
 	s.games[id] = game
 	s.mu.Unlock()
-	return cloneDemo(game, time.Now())
+	return cloneDemo(game, now)
 }
 
 func (s *DemoStore) Get(id string) (Demo, error) {
@@ -63,10 +64,11 @@ func (s *DemoStore) Play(id string, call simulation.Call) (Demo, model.Event, er
 	if game.State.Finished {
 		return cloneDemo(game, time.Now()), model.Event{}, errors.New("game is final")
 	}
+	now := time.Now()
 	event := s.engine.Play(&game.State, call)
 	game.Events = append(game.Events, event)
-	resetPlayClock(game, time.Now())
-	return cloneDemo(game, time.Now()), event, nil
+	resetPlayClock(game, now)
+	return cloneDemo(game, now), event, nil
 }
 
 // CallPlay applies one human coaching decision. Team X calls its offensive play
@@ -208,7 +210,7 @@ func cloneDemo(in *Demo, now time.Time) Demo {
 	out := Demo{State: in.State, PlayDeadline: in.PlayDeadline}
 	out.Events = append([]model.Event(nil), in.Events...)
 	if !in.State.Finished && !in.PlayDeadline.IsZero() {
-		remaining := int(time.Until(in.PlayDeadline).Seconds()) + 1
+		remaining := int(in.PlayDeadline.Sub(now).Seconds()) + 1
 		if remaining < 0 {
 			remaining = 0
 		}
@@ -217,6 +219,5 @@ func cloneDemo(in *Demo, now time.Time) Demo {
 		}
 		out.PlayClock = remaining
 	}
-	_ = now
 	return out
 }
