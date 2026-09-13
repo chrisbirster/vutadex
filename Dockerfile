@@ -8,7 +8,7 @@ RUN pnpm build:web
 
 FROM golang:1.26-alpine AS server
 WORKDIR /src
-COPY go.mod go.sum* ./
+COPY go.mod ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/internal/web/dist ./internal/web/dist

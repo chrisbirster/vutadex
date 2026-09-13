@@ -24,8 +24,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: pnpm install --no-frozen-lockfile
-      - run: go mod tidy
-      - run: pnpm verify
+      - name: Install web dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Resolve Go dependencies
+        run: go mod tidy
+      - name: Typecheck web
+        run: pnpm typecheck
+      - name: Build web
+        run: pnpm build:web
+      - name: Test Go
+        run: pnpm test:go
+      - name: Build Go
+        run: pnpm build:server
       - name: Build container
         run: docker build -t vutadex:test .
