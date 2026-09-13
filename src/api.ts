@@ -1,6 +1,6 @@
 export type GameEvent = { sequence:number; type:string; quarter:number; clock:number; description:string; yards?:number; scoring?:boolean };
 export type GameState = { id:string; seed:number; homeId:string; awayId:string; possession:string; quarter:number; clock:number; down:number; distance:number; ball:number; homeScore:number; awayScore:number; playNumber:number; finished:boolean };
-export type Simulation = { state: GameState; events: GameEvent[] };
+export type Simulation = { state: GameState; events: GameEvent[]; playDeadline:string; playClock:number };
 export type PlaybookPlay = { id:string; name:string; side:"offense"|"defense"; formation:string; personnel:string; concept:string };
 export type Playbooks = { offense: PlaybookPlay[]; defense: PlaybookPlay[] };
 
