@@ -31,6 +31,7 @@ func New(web http.Handler, o Options) http.Handler {
 	mux := http.NewServeMux()
 	engine := simulation.New()
 	games := game.NewService(engine, o.GameRepository)
+	lobbies := game.NewLobbyService(games)
 	emailLimiter := auth.NewLimiter(5, 10*time.Minute)
 	ipLimiter := auth.NewLimiter(20, 10*time.Minute)
 
@@ -101,6 +102,94 @@ func New(web http.Handler, o Options) http.Handler {
 		}
 		jsonOut(w, http.StatusOK, current)
 	})
+
+	mux.HandleFunc("POST /api/v1/rooms", func(w http.ResponseWriter, r *http.Request) {
+		u, err := session(r, o.Auth)
+		if err != nil {
+			problem(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		created, err := lobbies.Create(r.Context(), u.ID, parseSeed(r, uint64(time.Now().UnixNano())))
+		if err != nil {
+			lobbyProblem(w, err)
+			return
+		}
+		jsonOut(w, http.StatusCreated, created)
+	})
+	mux.HandleFunc("POST /api/v1/rooms/join", func(w http.ResponseWriter, r *http.Request) {
+		u, err := session(r, o.Auth)
+		if err != nil {
+			problem(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		var in struct {
+			InviteCode string `json:"inviteCode"`
+		}
+		if err := decode(r, &in); err != nil {
+			problem(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		catchUp, err := lobbies.Join(in.InviteCode, u.ID)
+		if err != nil {
+			lobbyProblem(w, err)
+			return
+		}
+		broadcastLobby(r, o.Hub, catchUp, 2)
+		jsonOut(w, http.StatusOK, catchUp)
+	})
+	mux.HandleFunc("GET /api/v1/rooms/{roomID}", func(w http.ResponseWriter, r *http.Request) {
+		u, err := session(r, o.Auth)
+		if err != nil {
+			problem(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		catchUp, err := lobbies.CatchUp(r.PathValue("roomID"), u.ID, parseSince(r))
+		if err != nil {
+			lobbyProblem(w, err)
+			return
+		}
+		jsonOut(w, http.StatusOK, catchUp)
+	})
+	mux.HandleFunc("POST /api/v1/rooms/{roomID}/calls", func(w http.ResponseWriter, r *http.Request) {
+		u, err := session(r, o.Auth)
+		if err != nil {
+			problem(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		var in struct {
+			Formation string `json:"formation"`
+			PlayID    string `json:"playId"`
+		}
+		if err := decode(r, &in); err != nil {
+			problem(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		catchUp, err := lobbies.LockCall(r.Context(), r.PathValue("roomID"), u.ID, in.Formation, in.PlayID)
+		if err != nil {
+			if lastLobbyEventKind(catchUp) == "round_reset" {
+				broadcastLobby(r, o.Hub, catchUp, 1)
+			}
+			lobbyProblem(w, err)
+			return
+		}
+		broadcastLobby(r, o.Hub, catchUp, 2)
+		jsonOut(w, http.StatusOK, catchUp)
+	})
+	mux.HandleFunc("POST /api/v1/rooms/{roomID}/forfeit", func(w http.ResponseWriter, r *http.Request) {
+		u, err := session(r, o.Auth)
+		if err != nil {
+			problem(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		catchUp, err := lobbies.Forfeit(r.PathValue("roomID"), u.ID)
+		if err != nil {
+			lobbyProblem(w, err)
+			return
+		}
+		broadcastLobby(r, o.Hub, catchUp, 1)
+		jsonOut(w, http.StatusOK, catchUp)
+	})
+
 	mux.HandleFunc("POST /api/v1/auth/magic-link", func(w http.ResponseWriter, r *http.Request) {
 		if o.Auth == nil {
 			problem(w, http.StatusServiceUnavailable, "auth unavailable")
@@ -181,6 +270,23 @@ func New(web http.Handler, o Options) http.Handler {
 		}
 		o.Hub.ServeGame(w, r, r.PathValue("gameID"))
 	})
+	mux.HandleFunc("GET /ws/v1/rooms/{roomID}", func(w http.ResponseWriter, r *http.Request) {
+		if o.Hub == nil {
+			http.Error(w, "realtime unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		u, err := session(r, o.Auth)
+		if err != nil {
+			http.Error(w, "not authenticated", http.StatusUnauthorized)
+			return
+		}
+		catchUp, err := lobbies.CatchUp(r.PathValue("roomID"), u.ID, parseSince(r))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		o.Hub.ServeGameSnapshot(w, r, catchUp.Room.ID, map[string]any{"type": "reconnect", "catchUp": catchUp})
+	})
 	mux.Handle("/", web)
 	return securityHeaders(mux, o)
 }
@@ -197,6 +303,36 @@ func parseSeed(r *http.Request, fallback uint64) uint64 {
 	return seed
 }
 
+func parseSince(r *http.Request) int {
+	raw := strings.TrimSpace(r.URL.Query().Get("since"))
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
+}
+
+func broadcastLobby(r *http.Request, hub *realtime.Hub, catchUp game.LobbyCatchUp, count int) {
+	if hub == nil || catchUp.Room.ID == "" {
+		return
+	}
+	events := catchUp.Events
+	if count > 0 && len(events) > count {
+		events = events[len(events)-count:]
+	}
+	hub.Broadcast(r.Context(), catchUp.Room.ID, map[string]any{"type": "lobby_update", "room": catchUp.Room, "events": events})
+}
+
+func lastLobbyEventKind(catchUp game.LobbyCatchUp) string {
+	if len(catchUp.Events) == 0 {
+		return ""
+	}
+	return catchUp.Events[len(catchUp.Events)-1].Kind
+}
+
 func gameProblem(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	switch {
@@ -206,6 +342,20 @@ func gameProblem(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	}
 	problem(w, status, err.Error())
+}
+
+func lobbyProblem(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "not a room participant"):
+		status = http.StatusForbidden
+	case strings.Contains(message, "not found"):
+		status = http.StatusNotFound
+	case strings.Contains(message, "already"), strings.Contains(message, "closed"), strings.Contains(message, "not ready"), strings.Contains(message, "expired"), strings.Contains(message, "locked"):
+		status = http.StatusConflict
+	}
+	problem(w, status, message)
 }
 
 func clientKey(r *http.Request) string {
