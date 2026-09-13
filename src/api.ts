@@ -1,6 +1,22 @@
 export type GameEvent = { sequence:number; type:string; quarter:number; clock:number; description:string; yards?:number; scoring?:boolean };
 export type GameState = { id:string; seed:number; homeId:string; awayId:string; possession:string; quarter:number; clock:number; down:number; distance:number; ball:number; homeScore:number; awayScore:number; playNumber:number; finished:boolean };
 export type FourthDownAdvice = { kind:"go"|"field_goal"|"punt"; label:string; reason:string };
+export type CoachingMetrics = {
+  fourthDownDecisions:number;
+  fourthDownCorrect:number;
+  delayOfGames:number;
+  clockDecisions:number;
+  clockCorrect:number;
+  audibles:number;
+};
+export type CoachingGrade = {
+  overall:number;
+  decisionMaking:number;
+  discipline:number;
+  clockManagement:number;
+  samples:number;
+  summary:string[];
+};
 export type Simulation = {
   state: GameState;
   events: GameEvent[];
@@ -9,6 +25,8 @@ export type Simulation = {
   timeouts:number;
   hurryUp:boolean;
   fourthDown?:FourthDownAdvice;
+  metrics:CoachingMetrics;
+  grade:CoachingGrade;
 };
 export type PlaybookPlay = { id:string; name:string; side:"offense"|"defense"; formation:string; personnel:string; concept:string };
 export type Playbooks = { offense: PlaybookPlay[]; defense: PlaybookPlay[] };
