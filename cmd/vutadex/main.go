@@ -17,6 +17,7 @@ import (
 	"github.com/chrisbirster/vutadex/internal/franchisehttp"
 	"github.com/chrisbirster/vutadex/internal/game"
 	"github.com/chrisbirster/vutadex/internal/httpapi"
+	"github.com/chrisbirster/vutadex/internal/lifecyclehttp"
 	"github.com/chrisbirster/vutadex/internal/live/espn"
 	"github.com/chrisbirster/vutadex/internal/realtime"
 	webapp "github.com/chrisbirster/vutadex/internal/web"
@@ -42,16 +43,21 @@ func main() {
 	var authStore auth.Store
 	var gameRepo game.Repository
 	var franchiseRepo franchise.Repository
+	var lifecycleRepo franchise.LifecycleRepository
 	var franchiseAccess franchise.Authorizer
 	if db != nil {
 		authStore = auth.NewPostgresStore(db)
 		gameRepo = game.NewPostgresRepository(db)
-		franchiseRepo = franchise.NewPostgresRepository(db)
+		postgresFranchise := franchise.NewPostgresRepository(db)
+		franchiseRepo = postgresFranchise
+		lifecycleRepo = postgresFranchise
 		franchiseAccess = franchise.NewPostgresAuthorizer(db)
 	} else {
 		authStore = auth.NewMemoryStore()
 		gameRepo = game.NewMemoryRepository()
-		franchiseRepo = franchise.NewMemoryRepository()
+		memoryFranchise := franchise.NewMemoryRepository()
+		franchiseRepo = memoryFranchise
+		lifecycleRepo = franchise.NewMemoryLifecycleRepository(memoryFranchise)
 		franchiseAccess = franchise.AllowAllAuthorizer{}
 	}
 
@@ -62,6 +68,7 @@ func main() {
 	}
 	authService := auth.NewService(authStore, sender, gameOrigin)
 	franchiseService := franchise.NewService(franchiseRepo, franchise.DefaultSalaryCap)
+	lifecycleService := franchise.NewLifecycleService(lifecycleRepo)
 	hub := realtime.New(hostPattern(gameOrigin), hostPattern(marketingOrigin), "localhost:5173", "127.0.0.1:5173")
 
 	webAndFranchise := franchisehttp.New(webapp.Handler(), franchisehttp.Options{
@@ -69,7 +76,12 @@ func main() {
 		Access:  franchiseAccess,
 		Auth:    authService,
 	})
-	handler := httpapi.New(webAndFranchise, httpapi.Options{
+	webAndLifecycle := lifecyclehttp.New(webAndFranchise, lifecyclehttp.Options{
+		Service: lifecycleService,
+		Access:  franchiseAccess,
+		Auth:    authService,
+	})
+	handler := httpapi.New(webAndLifecycle, httpapi.Options{
 		MarketingOrigin: marketingOrigin,
 		GameOrigin:      gameOrigin,
 		CookieSecure:    env("VUTADEX_COOKIE_SECURE", "0") == "1",
