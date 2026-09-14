@@ -22,6 +22,8 @@ import (
 	"github.com/chrisbirster/vutadex/internal/httpapi"
 	"github.com/chrisbirster/vutadex/internal/lifecyclehttp"
 	"github.com/chrisbirster/vutadex/internal/live/espn"
+	"github.com/chrisbirster/vutadex/internal/livehttp"
+	"github.com/chrisbirster/vutadex/internal/observability"
 	"github.com/chrisbirster/vutadex/internal/realtime"
 	"github.com/chrisbirster/vutadex/internal/season"
 	"github.com/chrisbirster/vutadex/internal/seasonhttp"
@@ -83,44 +85,22 @@ func main() {
 	seasonService := season.NewService(seasonRepo, simulation.New())
 	historyService := dex.NewHistoryService(historyRepo)
 	hub := realtime.New(hostPattern(gameOrigin), hostPattern(marketingOrigin), "localhost:5173", "127.0.0.1:5173")
+	liveProvider := espn.New(env("VUTADEX_ESPN_BASE_URL", "https://site.api.espn.com"))
 
-	webAndFranchise := franchisehttp.New(webapp.Handler(), franchisehttp.Options{
-		Service: franchiseService,
-		Access:  franchiseAccess,
-		Auth:    authService,
+	webAndFranchise := franchisehttp.New(webapp.Handler(), franchisehttp.Options{Service: franchiseService, Access: franchiseAccess, Auth: authService})
+	webAndLifecycle := lifecyclehttp.New(webAndFranchise, lifecyclehttp.Options{Service: lifecycleService, Access: franchiseAccess, Auth: authService})
+	webAndSeasons := seasonhttp.New(webAndLifecycle, seasonhttp.Options{Service: seasonService, Access: franchiseAccess, Auth: authService})
+	webAndDex := dexhttp.New(webAndSeasons, dexhttp.Options{Service: historyService, Access: franchiseAccess, Auth: authService})
+	coreHandler := httpapi.New(webAndDex, httpapi.Options{MarketingOrigin: marketingOrigin, GameOrigin: gameOrigin, CookieSecure: env("VUTADEX_COOKIE_SECURE", "0") == "1", Auth: authService, Hub: hub, ESPN: liveProvider, GameRepository: gameRepo})
+	liveHandler := livehttp.New(coreHandler, livehttp.Options{Provider: liveProvider})
+	handler := observability.New(liveHandler, func(ctx context.Context) error {
+		if db == nil {
+			return nil
+		}
+		return db.PingContext(ctx)
 	})
-	webAndLifecycle := lifecyclehttp.New(webAndFranchise, lifecyclehttp.Options{
-		Service: lifecycleService,
-		Access:  franchiseAccess,
-		Auth:    authService,
-	})
-	webAndSeasons := seasonhttp.New(webAndLifecycle, seasonhttp.Options{
-		Service: seasonService,
-		Access:  franchiseAccess,
-		Auth:    authService,
-	})
-	webAndDex := dexhttp.New(webAndSeasons, dexhttp.Options{
-		Service: historyService,
-		Access:  franchiseAccess,
-		Auth:    authService,
-	})
-	handler := httpapi.New(webAndDex, httpapi.Options{
-		MarketingOrigin: marketingOrigin,
-		GameOrigin:      gameOrigin,
-		CookieSecure:    env("VUTADEX_COOKIE_SECURE", "0") == "1",
-		Auth:            authService,
-		Hub:             hub,
-		ESPN:            espn.New(env("VUTADEX_ESPN_BASE_URL", "https://site.api.espn.com")),
-		GameRepository:  gameRepo,
-	})
-	server := &http.Server{
-		Addr:              ":" + env("PORT", "8080"),
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       90 * time.Second,
-	}
+
+	server := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 90 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
