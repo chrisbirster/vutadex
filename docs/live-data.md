@@ -2,7 +2,25 @@
 
 `internal/live.Provider` isolates external sports feeds from VutaDex's own model. The checked-in ESPN adapter is a **development adapter**, not a production licensing strategy.
 
-The current prototype fetches ESPN's game-summary JSON by event ID. Normalization must preserve only facts the provider actually knows. Ordinary play-by-play usually gives situation, participants and result but not exact movement of all 22 players.
+The ESPN adapter currently exposes four layers:
+
+- the raw game-summary payload for development/debugging;
+- normalized plays;
+- normalized current situation;
+- a replay-friendly gamecast that groups plays into drives.
+
+The development adapter reads the public-facing ESPN site/core endpoints and keeps a short three-second in-process response cache. This reduces duplicate upstream calls when the browser requests the situation, plays, and gamecast together. The provider boundary remains intentionally independent of ESPN so a licensed feed can replace it later.
+
+Development API routes:
+
+```text
+GET /api/v1/live/espn/{gameID}
+GET /api/v1/live/espn/{gameID}/plays
+GET /api/v1/live/espn/{gameID}/situation
+GET /api/v1/live/espn/{gameID}/gamecast
+```
+
+Normalization preserves only facts the provider actually knows. Ordinary play-by-play usually gives situation, participants and result but not exact movement of all 22 players. A drive reference is used when supplied by the feed; when it is absent, VutaDex creates a clearly synthetic grouping when possession changes rather than inventing provider facts.
 
 Therefore:
 
@@ -10,4 +28,4 @@ Therefore:
 - real games may render a clearly labelled reconstruction;
 - routes/coverage must not be presented as tracked fact unless the provider includes tracking data.
 
-Before VutaDex commercially depends on live NFL data, replace undocumented feeds with a licensed provider and review display/data-retention rights.
+Before VutaDex commercially depends on live NFL data, replace undocumented feeds with a licensed provider and review display/data-retention rights. The production provider should implement the same `live.Provider` contract and can add durable/shared caching outside the application process.
