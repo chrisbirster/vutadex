@@ -1,6 +1,6 @@
 # Vutadex roadmap
 
-Status: M0 implementation proposed in feature PR; M1–M7 pending. A milestone is complete only after its acceptance tests pass and its release PR is approved.
+Status: M0 code foundation implemented; verification, owner rules, and milestone release are pending. M1–M7 pending. A milestone is complete only after its acceptance tests pass and its release PR is approved.
 
 ## M0 — Foundation
 - [x] Native TypeScript CLI, SQLite, basic test harness.
@@ -9,8 +9,10 @@ Status: M0 implementation proposed in feature PR; M1–M7 pending. A milestone i
 - [x] Add CI for `dev` and `main` on macOS, Windows, Linux.
 - [x] Add TypeScript type checks and SQLite schema version migration.
 - [x] Contributing and branch-flow docs.
-- [ ] PR CI verified green and release acceptance reviewed.
-- [ ] Branch rules requiring CI and reviews configured by repository owner.
+- [x] Initial foundation PR #13 merged into dev with all three OS checks green.
+- [x] Lightweight TypeScript-only lint/format scripts added in a feature PR (pending checks and merge).
+- [ ] Final M0 quality gate CI and release PR reviewed.
+- [ ] Branch rules requiring CI and reviews configured by repository owner (see docs/quality-gates.md).
 
 ## M1 — Decks
 Create/list/show/rename/delete, duplicate-name policy, destructive confirmation, tests.
