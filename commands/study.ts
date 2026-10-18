@@ -4,7 +4,8 @@ import { DeckError } from '../services/decks.ts';
 import { ReviewError } from '../services/reviews.ts';
 import { openStudySession, nextStudyItem, rateStudyCard, sessionSummary,
   skipStudyCard, undoLastStudyReview, finishStudySession, StudyError } from '../services/study.ts';
-import type { StudyOptions, StudySession } from '../services/study.ts';
+import { MAX_STUDY_LIMIT } from '../constants.ts';
+import type { StudyOptions, StudySession } from '../models/study.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
 import { makeStudyInput } from './study-input.ts';
 import { interactionForCard,needsAnswerInput,evaluateAnswer,answerPrompt } from '../services/study-interactions.ts';
@@ -35,7 +36,7 @@ function parseArgs(args: string[]): Config | null {
       if (seen.has(arg) || value === undefined || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
       seen.add(arg);
       const n = Number(value);
-      if (!Number.isSafeInteger(n) || n > 1000) return null;
+      if (!Number.isSafeInteger(n) || n > MAX_STUDY_LIMIT) return null;
       if (arg === '--new-limit') options.newLimit = n;
       else options.reviewLimit = n;
     } else if (!arg.startsWith('-') && options.deckId === undefined) {

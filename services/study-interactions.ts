@@ -1,14 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { noteForCard } from './notes.ts';
 import { parseChoices,parseSelection } from './note-types.ts';
-import type { Choice,NoteType } from './note-types.ts';
+import { POSITIVE_INTEGER_PATTERN } from '../constants.ts';
+import type { Interaction } from '../models/interaction.ts';
+import type { Choice } from '../models/note.ts';
 
-export type Interaction = {
-  kind: NoteType | 'legacy';
-  answer?: string;
-  choices?: Choice[];
-  correctIds?: string[];
-};
 function normalize(text:string):string {
   return text.normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase();
 }
@@ -31,7 +27,7 @@ export function interactionForCard(db:DatabaseSync,cardId:number):Interaction {
 }
 function enteredIds(text:string, choices:readonly Choice[]):string[]{
   return text.split(',').map(s=>s.trim()).filter(Boolean).map(entry=>{
-    if(/^[1-9][0-9]*$/.test(entry)){
+    if(POSITIVE_INTEGER_PATTERN.test(entry)){
       const index=Number(entry)-1;
       return choices[index]?.id??entry;
     }

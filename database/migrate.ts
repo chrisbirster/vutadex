@@ -1,48 +1,39 @@
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
+import { listMigrations, loadMigration, loadQuery, queryOne } from './sql.ts';
 
-const migrations = [
-  '001_initial.sql',
-  '002_fsrs.sql',
-  '003_study_sessions.sql',
-  '004_notes.sql',
-];
+const USER_VERSION_SQL = loadQuery('schema/user-version.sql');
 
 type UserVersion = {
   user_version: number;
 }
 
 function readVersion(db: DatabaseSync): number {
-  const row = db.prepare('PRAGMA user_version').get() as UserVersion;
-  return row.user_version || 0;
+  return queryOne<UserVersion>(db, USER_VERSION_SQL)?.user_version ?? 0;
 }
 
-export function migrate(db: DatabaseSync): void {
+function checkCurrentMigrationVersion(db: DatabaseSync, migrationFiles: string[]): number {
   const currentMigrationVersion = readVersion(db);
-
-  if (currentMigrationVersion > migrations.length) {
+  if (currentMigrationVersion > migrationFiles.length) {
     throw new Error(
       'Database was created by a newer version of Vutadex.',
     );
   }
+  return currentMigrationVersion;
+}
 
-  for (let index = currentMigrationVersion; index < migrations.length; index++) {
+function applyMigrations(db: DatabaseSync, currentMigrationVersion: number, migrationFiles: string[]) {
+  for (let index = currentMigrationVersion; index < migrationFiles.length; index++) {
     const version = index + 1;
-    const filename = migrations[index];
-
-    const sql = readFileSync(
-      new URL(`./migrations/${filename}`, import.meta.url),
-      'utf8',
-    );
 
     db.exec('BEGIN IMMEDIATE');
     try {
       // Re-check under the write lock; another process may have applied this migration already.
-      if (currentMigrationVersion >= version) {
+      if (readVersion(db) >= version) {
         db.exec('ROLLBACK');
         continue;
       }
-      db.exec(sql);
+      db.exec(loadMigration(migrationFiles[index]!));
+      // PRAGMA cannot take bound parameters; `version` is a loop counter, never user input.
       db.exec(`PRAGMA user_version = ${version}`);
       db.exec('COMMIT');
     } catch (error) {
@@ -50,4 +41,10 @@ export function migrate(db: DatabaseSync): void {
       throw error;
     }
   }
+}
+
+export function migrate(db: DatabaseSync): void {
+  const migrationFiles = listMigrations();
+  const currentMigrationVersion = checkCurrentMigrationVersion(db, migrationFiles);
+  applyMigrations(db, currentMigrationVersion, migrationFiles)
 }

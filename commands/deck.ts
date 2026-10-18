@@ -2,12 +2,11 @@ import { createInterface } from 'node:readline/promises';
 import process from 'node:process';
 import { getDatabase } from '../database/index.ts';
 import { DeckError, createDeck, deleteDeck, describeDeck, getDeck, listDecks, renameDeck } from '../services/decks.ts';
-
-const DECK_ID_PATTERN = /^[1-9]\d*$/;
+import { POSITIVE_INTEGER_PATTERN } from '../constants.ts';
 
 function parseId(raw: string | undefined): number {
   const id = Number(raw);
-  if (!raw || !DECK_ID_PATTERN.test(raw) || !Number.isSafeInteger(id)) {
+  if (!raw || !POSITIVE_INTEGER_PATTERN.test(raw) || !Number.isSafeInteger(id)) {
     throw new DeckError('Expected a positive integer deck ID.');
   }
   return id;

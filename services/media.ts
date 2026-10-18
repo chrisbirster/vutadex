@@ -2,12 +2,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getDataHome } from '../utils/paths.ts';
+import { APP_NAME, MAX_IMAGE_BYTES, MEDIA_REFERENCE_PATTERN, MEDIA_REFERENCE_PREFIX } from '../constants.ts';
 
 export class MediaError extends Error {}
-const MAX_IMAGE_BYTES=20*1024*1024;
-const PREFIX='deez-media://sha256:';
-const keyPattern=/^deez-media:\/\/sha256:([0-9a-f]{64})$/;
-function storageDir():string {return path.join(getDataHome(),'vutadex','media');}
+function storageDir():string {return path.join(getDataHome(),APP_NAME,'media');}
 
 function fileType(buffer:Buffer):string {
   if(buffer.length>=8&&buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return 'image/png';
@@ -35,10 +33,10 @@ export function importImage(filename:string):{reference:string;bytes:number;mime
     if(createHash('sha256').update(old).digest('hex')!==hash)
       throw new MediaError('Existing media file checksum mismatch.');
   }
-  return {reference:PREFIX+hash,bytes:bytes.length,mime,path:target};
+  return {reference:MEDIA_REFERENCE_PREFIX+hash,bytes:bytes.length,mime,path:target};
 }
 export function locateImage(reference:string):{path:string;bytes:number;mime:string}{
-  const hash=keyPattern.exec(reference)?.[1];
+  const hash=MEDIA_REFERENCE_PATTERN.exec(reference)?.[1];
   if(!hash)throw new MediaError('Invalid content-addressed media reference.');
   const p=path.join(storageDir(),hash);
   if(!fs.existsSync(p))throw new MediaError('Image is not available in the local media store.');

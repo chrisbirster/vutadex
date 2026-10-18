@@ -1,14 +1,6 @@
-/** Built-in note semantics compatible with Plandalf's logical .deck v2 fields. */
-export type NoteType =
-  | 'basic' | 'reverse' | 'optional-reverse' | 'cloze'
-  | 'type-answer' | 'multiple-choice' | 'multiple-select'
-  | 'ordering' | 'image-occlusion';
-export type Draft = { key: string; front: string; back: string };
-export type Choice = { id: string; text: string };
-export type Mask = {
-  id: number; x: number; y: number; width: number; height: number;
-  answer: string; prompt?: string;
-};
+import { MAX_TEXT_LENGTH, MEDIA_REFERENCE_PATTERN, MEDIA_REFERENCE_PREFIX } from '../constants.ts';
+import type { Choice, Draft, Mask, NoteType } from '../models/note.ts';
+
 export class NoteError extends Error {}
 
 export const NOTE_FIELDS: Readonly<Record<NoteType, readonly string[]>> = {
@@ -39,13 +31,13 @@ export function parseNoteType(value: string): NoteType {
 }
 
 function nonempty(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > 10000 || value.includes('\0'))
-    throw new NoteError(label + ' must contain 1–10000 characters without NUL.');
+  if (typeof value !== 'string' || !value.trim() || value.length > MAX_TEXT_LENGTH || value.includes('\0'))
+    throw new NoteError(label + ' must contain 1–' + MAX_TEXT_LENGTH + ' characters without NUL.');
   return value.trim();
 }
 function optional(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.length > 10000 || value.includes('\0'))
-    throw new NoteError(label + ' must be text of at most 10000 characters.');
+  if (typeof value !== 'string' || value.length > MAX_TEXT_LENGTH || value.includes('\0'))
+    throw new NoteError(label + ' must be text of at most ' + MAX_TEXT_LENGTH + ' characters.');
   return value.trim();
 }
 function parseJson(value: string, label: string): unknown {
@@ -134,8 +126,8 @@ function renderCloze(source: string, spans: readonly Cloze[], ordinal: number | 
 }
 function checkDraft(draft: Draft): Draft {
   if (!draft.front.trim() || !draft.back.trim() ||
-      draft.front.length > 10000 || draft.back.length > 10000)
-    throw new NoteError('Generated card front/back must each contain 1–10000 characters.');
+      draft.front.length > MAX_TEXT_LENGTH || draft.back.length > MAX_TEXT_LENGTH)
+    throw new NoteError('Generated card front/back must each contain 1–' + MAX_TEXT_LENGTH + ' characters.');
   return draft;
 }
 function explain(text: string): string { return text ? '\n\n' + text : ''; }
@@ -195,8 +187,8 @@ export function generateCards(noteId: number, type: NoteType, fields: readonly s
     }
     case 'image-occlusion': {
       const image = nonempty(fields[0], 'Image'), extra = optional(fields[2], 'Extra');
-      if (!/^deez-media:\/\/sha256:[0-9a-f]{64}$/.test(image))
-        throw new NoteError('Image must be a deez-media://sha256:<64 lowercase hex> reference.');
+      if (!MEDIA_REFERENCE_PATTERN.test(image))
+        throw new NoteError('Image must be a ' + MEDIA_REFERENCE_PREFIX + '<64 lowercase hex> reference.');
       const masks = parseMasks(fields[1]!);
       drafts = masks.sort((a,b)=>a.id-b.id).map(m=>checkDraft({key:key('occlusion:'+m.id),
         front:(m.prompt ?? 'Identify the masked region.')+'\n[image: '+image+']'+

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../database/schema.ts';
+import { migrate } from '../database/migrate.ts';
 import { createDeck,getDeck } from '../services/decks.ts';
 import { addCard,editCard,deleteCard,listCards } from '../services/cards.ts';
 import { reviewCard,getSchedule,reviewHistory,dueCards } from '../services/reviews.ts';

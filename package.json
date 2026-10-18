@@ -5,8 +5,19 @@
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "index.ts",
+  "bin": {
+    "vdex": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node --experimental-strip-types scripts/copy-sql.ts",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm test",
