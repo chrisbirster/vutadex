@@ -19,9 +19,9 @@ COMMANDS
 DECKS
   deck list             List all decks
   deck create <name>    Create a deck
-  deck show <name>      View a deck
-  deck rename <id>      Rename a deck
-  deck delete <id>      Delete a deck
+  deck show <id>        View a deck
+  deck rename <id> <name> Rename a deck\n  deck describe <id> <text> Set description\n  deck describe <id> --clear Clear description
+  deck delete <id> [--yes] Delete a deck
 
 CARDS
   card list <deck>      List cards in a deck
