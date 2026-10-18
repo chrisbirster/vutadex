@@ -33,7 +33,9 @@ if (!write && !process.argv.includes('--check')) {
   for (const file of targets) {
     const original = readFileSync(file, 'utf8');
     const fixed = normalize(original);
-    if (original === fixed) continue;
+    // Git for Windows may check out CRLF; do not fail CI for that conversion.
+    const comparable = process.platform === 'win32' ? original.replace(/\r\n/g, '\n') : original;
+    if (comparable === fixed) continue;
     if (write) writeFileSync(file, fixed);
     else {
       console.error('Formatting required:', file);
