@@ -26,7 +26,7 @@ test('v1 database upgrades through latest schema and migration is idempotent', (
     migrate(db);
     migrate(db);
     const version = db.prepare('PRAGMA user_version').get() as { user_version: number };
-    assert.equal(version.user_version, 3);
+    assert.equal(version.user_version, 4);
     assert.equal((db.prepare('SELECT front FROM cards WHERE id=1').get() as { front: string }).front, 'old');
   } finally { db.close(); }
 });

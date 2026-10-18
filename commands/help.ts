@@ -12,6 +12,8 @@ COMMANDS
   doctor                Show setup status
   deck                  Deck commands
   card                  Card commands
+  note                  Logical notes and generated cards
+  media                 Content-addressed local images
   study                 Study commands
   progress              Progress commands
 
@@ -23,6 +25,18 @@ DECKS
   deck describe <id> <text> Set description
   deck describe <id> --clear Clear description
   deck delete <id> [--yes] Delete a deck
+
+NOTES
+  note types             List built-in note types
+  note add <deck-id> <type> <fields...> Create generated cards
+  note list <deck-id>    List logical notes
+  note show <note-id>    Show fields and generated cards
+  note edit <note-id> <fields...> Update note without resetting FSRS
+  note delete <note-id> [--yes] Retire note and preserve history
+
+MEDIA
+  media add <image-path> Store local PNG/JPEG/WebP/GIF
+  media inspect <ref>    Resolve saved media reference
 
 CARDS
   card list <deck-id>   List cards in a deck

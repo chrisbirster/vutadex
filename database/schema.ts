@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 
 export function migrate(db: DatabaseSync): void {
   const version = db.prepare('PRAGMA user_version').get() as { user_version: number };
-  if (version.user_version > 3) {
+  if (version.user_version > 4) {
     throw new Error('Database was created by a newer version of Vutadex.');
   }
   if (version.user_version < 1) {
@@ -99,6 +99,37 @@ export function migrate(db: DatabaseSync): void {
         );
         CREATE INDEX study_session_items_pending ON study_session_items(session_id, status, position);
         PRAGMA user_version = 3;
+      `);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  if (version.user_version < 4) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`
+        CREATE TABLE notes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deck_id INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+          note_type TEXT NOT NULL,
+          fields_json TEXT NOT NULL,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN (0,1)),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX notes_deck_idx ON notes(deck_id, retired);
+        CREATE TABLE generated_cards (
+          card_id INTEGER PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+          note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+          generation_key TEXT NOT NULL UNIQUE,
+          retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN (0,1))
+        );
+        CREATE INDEX generated_cards_note_idx ON generated_cards(note_id, retired);
+        PRAGMA user_version = 4;
       `);
       db.exec('COMMIT');
     } catch (error) {

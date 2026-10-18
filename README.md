@@ -1,6 +1,6 @@
 # Vutadex
 
-A local-first TypeScript terminal flashcard application. No server, Fly.io, or cloud secrets required. FSRS-7 scheduling and interactive study sessions are implemented; additional M5 study methods are planned.
+A local-first TypeScript terminal flashcard application. No server, Fly.io, or cloud secrets required. FSRS-7, interactive studying, and Plandalf-style generated note types are implemented.
 
 ## Requirements
 Node.js 26 and npm.
@@ -58,3 +58,18 @@ node index.ts study 1 --restart
 ```
 
 Space/Enter reveals the back; press 1–4 to rate, s to skip, u to undo or q to pause. The selected queue and progress survive restarts. See [M4 study session guide](docs/m4.md).
+
+## Plandalf-style notes (M5)
+
+Create, list and edit **logical notes** that generate one or more independent FSRS-7 cards:
+
+```sh
+node index.ts note types
+node index.ts note add 1 basic "Capital of France?" "Paris"
+node index.ts note add 1 reverse "France" "Paris"
+node index.ts note add 1 cloze "{{c1::Paris}} is in {{c2::France}}." ""
+node index.ts note list 1
+node index.ts media add ./diagram.png
+```
+
+Other types: optional reverse, type-answer, multiple-choice, multiple-select, ordering and image-occlusion. Typed, choice, select and ordering interactions run inside `study` but **do not automatically choose an FSRS grade**. Existing manual cards remain supported; note edits regenerate cards under stable identities without discarding review history. See [M5 note types and media](docs/m5.md). `.deck` import/export and a graphical image viewer are not yet built.
