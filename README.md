@@ -16,7 +16,7 @@ node index.ts deck create "Spanish"
 node index.ts deck list
 ```
 
-Implemented commands: `help`, `version`, `deck list`, `deck create`, `deck show`, `deck rename`, `deck describe`, and `deck delete`. See [M1 deck documentation](docs/m1.md). Card commands are now implemented too: `card add`, `card list`, `card show`, `card edit`, `card search`, and `card delete`. See [M2 card documentation](docs/m2.md). Study and FSRS remain roadmap items.
+Implemented commands: `help`, `version`, `deck list`, `deck create`, `deck show`, `deck rename`, `deck describe`, and `deck delete`. See [M1 deck documentation](docs/m1.md). Card commands are now implemented too: `card add`, `card list`, `card show`, `card edit`, `card search`, and `card delete`. See [M2 card documentation](docs/m2.md). Interactive study sessions remain a roadmap item; FSRS-7 scheduling, review history and undo are implemented.
 
 ## Local database
 SQLite is stored at:
@@ -35,3 +35,15 @@ Tests use Node's built-in test runner, written in TypeScript. The database persi
 Run `npm run format` to normalize whitespace (LF, trailing whitespace, final newline). See [docs/quality-gates.md](docs/quality-gates.md) for enforcement details.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/roadmap.md](docs/roadmap.md).
+
+## FSRS-7 scheduler
+
+```sh
+node index.ts due
+node index.ts card review 1 good
+node index.ts card schedule 1
+node index.ts card history 1
+node index.ts card undo 1
+```
+
+See [M3 FSRS-7 documentation](docs/m3.md). The engine is pure TypeScript with a SQLite v2 migration. It uses a fixed default 90% target retention; personalized weight fitting is not part of M3.
