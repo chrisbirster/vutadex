@@ -1,5 +1,4 @@
-
-export function help(): void {
+export function handleHelpCommand(): number {
   const output = `
 Vutadex — Terminal Flashcards
 Learn smarter. Remember longer.
@@ -53,4 +52,5 @@ EXAMPLES
   vutadex stats
 `
   console.log(output);
+  return 0;
 }
