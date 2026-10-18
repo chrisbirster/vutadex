@@ -12,7 +12,7 @@ function run(args: string[], home?: string) {
   return spawnSync(process.execPath, [entrypoint, ...args], {
     encoding: 'utf8',
     env: home
-      ? { ...process.env, HOME: home, XDG_DATA_HOME: join(home, 'data') }
+      ? { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: join(home, 'data'), XDG_DATA_HOME: join(home, 'data') }
       : process.env,
   });
 }
