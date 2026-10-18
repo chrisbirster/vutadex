@@ -60,3 +60,19 @@ test('deck commands persist, validate duplicates and confirm deletion', () => {
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('card CRUD and search persist across CLI invocations', () => {
+  const home = mkdtempSync(join(tmpdir(), 'vutadex-m2-'));
+  try {
+    assert.equal(run(['deck', 'create', 'Spanish'], home).status, 0);
+    const added = run(['card', 'add', '1', '--front', 'hola', '--back', 'hello'], home);
+    assert.equal(added.status, 0, added.stderr);
+    assert.match(run(['card', 'show', '1'], home).stdout, /hello/);
+    assert.match(run(['card', 'search', '1', 'HOL'], home).stdout, /hola/);
+    assert.equal(run(['card', 'edit', '1', '--back', 'good morning'], home).status, 0);
+    assert.match(run(['card', 'list', '1'], home).stdout, /good morning/);
+    assert.equal(run(['card', 'delete', '1'], home).status, 1);
+    assert.equal(run(['card', 'delete', '1', '--yes'], home).status, 0);
+    assert.equal(run(['card', 'show', '1'], home).status, 1);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

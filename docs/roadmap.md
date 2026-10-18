@@ -18,7 +18,7 @@ Status: M0 released to main (#15), branch rules active. M1 implemented in dev (#
 - [x] Create/list/show/rename/delete deck commands.\n- [x] Descriptions and clear-description command.\n- [x] Case-insensitive duplicate-name validation and ID validation.\n- [x] Interactive deletion confirmation and explicit --yes automation override.\n- [x] TypeScript unit and CLI tests.\n- [x] M1 feature PR #16 passed Ubuntu/macOS/Windows CI and merged to dev.\n- [ ] M1 release PR merged to main.
 
 ## M2 — Cards
-Add/edit/list/show/delete, multiline text, search, validation, tests.
+- [x] Add/edit/list/show/delete, multiline prompts, search, validation, service and CLI tests.\n- [ ] M2 release PR merged to main.
 
 ## M3 — FSRS
 Select FSRS library/version; schema for scheduling state and review history; Again/Hard/Good/Easy, transactional reviews, rollback/undo, time-zone tests.

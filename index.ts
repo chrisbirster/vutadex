@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { help } from './commands/help.ts';
 import { runDeckCommand } from './commands/deck.ts';
+import { runCardCommand } from './commands/card.ts';
 
 export async function main(args: string[]): Promise<number> {
   const [command, subcommand, ...rest] = args;
@@ -19,6 +20,7 @@ export async function main(args: string[]): Promise<number> {
       console.log('Vutadex v0.1.0');
       return 0;
     case 'card':
+      return runCardCommand(subcommand, rest);
     case 'study':
     case 'stats':
     case 'due':
