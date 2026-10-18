@@ -18,7 +18,7 @@ export async function main(args: string[]): Promise<number> {
     case 'version':
     case '-v':
     case '--version':
-      console.log('Vutadex v0.1.0');
+      console.log('Vutadex v0.3.0');
       return 0;
     case 'card':
       return runCardCommand(subcommand, rest);
