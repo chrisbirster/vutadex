@@ -14,6 +14,7 @@ COMMANDS
   deck                  Deck commands
   card                  Card commands
   note                  Logical notes and generated cards
+  media                 Content-addressed local images
   study                 Study commands
   progress              Progress commands
 
@@ -33,6 +34,10 @@ NOTES
   note show <note-id>    Show fields and generated cards
   note edit <note-id> <fields...> Update note without resetting FSRS
   note delete <note-id> [--yes] Retire note and preserve history
+
+MEDIA
+  media add <image-path> Store local PNG/JPEG/WebP/GIF
+  media inspect <ref>    Resolve saved media reference
 
 CARDS
   card list <deck-id>   List cards in a deck
