@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getDataHome } from '../utils/paths.ts';
-import { migrate } from './schema.ts';
+import { migrate } from './migrate.ts';
 
 const APP_NAME = 'vutadex';
 const DB_NAME = 'vdex.db';

@@ -3,15 +3,26 @@ import process from 'node:process';
 import { getDatabase } from '../database/index.ts';
 import { DeckError, createDeck, deleteDeck, describeDeck, getDeck, listDecks, renameDeck } from '../services/decks.ts';
 
+const DECK_ID_PATTERN = /^[1-9]\d*$/;
+
 function parseId(raw: string | undefined): number {
-  if (!raw || !/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+  const id = Number(raw);
+  if (!raw || !DECK_ID_PATTERN.test(raw) || !Number.isSafeInteger(id)) {
     throw new DeckError('Expected a positive integer deck ID.');
   }
-  return Number(raw);
+  return id;
 }
 
+const USAGE = `Usage:
+  deck list
+  deck create <name> [--description <text>]
+  deck show <id>
+  deck rename <id> <name>
+  deck describe <id> <text | --clear>
+  deck delete <id> [--yes]`;
+
 function usage(): number {
-  console.error('Usage: deck list | create <name> [--description <text>] | show <id> | rename <id> <name> | describe <id> <text|--clear> | delete <id> [--yes]');
+  console.error(USAGE);
   return 1;
 }
 
@@ -49,6 +60,7 @@ export async function runDeckCommand(subcommand: string | undefined, args: strin
       }
     }
 
+    // TODO: should we make this called once in the beginning only
     const db = getDatabase();
     try {
       switch (subcommand) {

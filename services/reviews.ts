@@ -3,6 +3,17 @@ import { getCard } from './cards.ts';
 import { FSRS_VERSION } from '../fsrs/parameters.ts';
 import { retrievability, nextMemoryState, nextIntervalDays } from '../fsrs/algorithm.ts';
 import type { MemoryState, Rating } from '../fsrs/algorithm.ts';
+import { loadQuery } from '../database/sql.ts';
+
+const GET_SCHEDULE_SQL = loadQuery('reviews/get-schedule.sql');
+const DELETE_SCHEDULE_SQL = loadQuery('reviews/delete-schedule.sql');
+const UPSERT_SCHEDULE_SQL = loadQuery('reviews/upsert-schedule.sql');
+const IS_RETIRED_SQL = loadQuery('reviews/is-retired.sql');
+const INSERT_REVIEW_EVENT_SQL = loadQuery('reviews/insert-review-event.sql');
+const REVIEW_HISTORY_SQL = loadQuery('reviews/history.sql');
+const LATEST_ACTIVE_REVIEW_SQL = loadQuery('reviews/latest-active.sql');
+const INSERT_UNDO_EVENT_SQL = loadQuery('reviews/insert-undo-event.sql');
+const DUE_CARDS_SQL = loadQuery('reviews/due.sql');
 
 const DAY_MS = 86400000;
 export const TARGET_RETENTION = 0.9;
@@ -34,7 +45,7 @@ function checkedTime(now: Date): string {
   return now.toISOString();
 }
 function readSchedule(db: DatabaseSync, cardId: number): Schedule | null {
-  const row = db.prepare('SELECT * FROM card_schedules WHERE card_id = ?').get(cardId) as
+  const row = db.prepare(GET_SCHEDULE_SQL).get(cardId) as
     | { stability: number; difficulty: number; fast_stability: number;
         last_review_at: string; due_at: string; review_count: number; scheduler_version: string }
     | undefined;
@@ -53,19 +64,10 @@ export function getSchedule(db: DatabaseSync, cardId: number): Schedule | null {
 }
 function putSchedule(db: DatabaseSync, cardId: number, schedule: Schedule | null): void {
   if (!schedule) {
-    db.prepare('DELETE FROM card_schedules WHERE card_id = ?').run(cardId);
+    db.prepare(DELETE_SCHEDULE_SQL).run(cardId);
     return;
   }
-  db.prepare(`
-    INSERT INTO card_schedules
-      (card_id, stability, difficulty, fast_stability, last_review_at, due_at, review_count, scheduler_version, target_retention)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(card_id) DO UPDATE SET
-      stability=excluded.stability, difficulty=excluded.difficulty,
-      fast_stability=excluded.fast_stability, last_review_at=excluded.last_review_at,
-      due_at=excluded.due_at, review_count=excluded.review_count,
-      scheduler_version=excluded.scheduler_version, target_retention=excluded.target_retention
-  `).run(cardId, schedule.state.stability, schedule.state.difficulty,
+  db.prepare(UPSERT_SCHEDULE_SQL).run(cardId, schedule.state.stability, schedule.state.difficulty,
     schedule.state.fastStability, schedule.lastReviewAt, schedule.dueAt,
     schedule.reviewCount, FSRS_VERSION, TARGET_RETENTION);
 }
@@ -84,7 +86,7 @@ export function reviewCard(
   db.exec('BEGIN IMMEDIATE');
   try {
     getCard(db, cardId);
-    if (db.prepare('SELECT 1 FROM generated_cards WHERE card_id=? AND retired=1').get(cardId))
+    if (db.prepare(IS_RETIRED_SQL).get(cardId))
       throw new ReviewError('Retired generated cards cannot be reviewed.');
     const before = readSchedule(db, cardId);
     hooks?.before?.(before);
@@ -96,11 +98,7 @@ export function reviewCard(
     const dueAt = new Date(now.getTime() + Math.max(1000, Math.round(days * DAY_MS))).toISOString();
     const after: Schedule = { state, lastReviewAt: timestamp, dueAt, reviewCount: (before?.reviewCount ?? 0) + 1 };
     putSchedule(db, cardId, after);
-    const inserted = db.prepare(`
-      INSERT INTO review_events
-      (card_id, event_type, rating, occurred_at, before_json, after_json, elapsed_days, retrievability_before, scheduler_version)
-      VALUES (?, 'review', ?, ?, ?, ?, ?, ?, ?)
-    `).run(cardId, rating, timestamp, before ? JSON.stringify(before) : null,
+    const inserted = db.prepare(INSERT_REVIEW_EVENT_SQL).run(cardId, rating, timestamp, before ? JSON.stringify(before) : null,
       JSON.stringify(after), elapsed, recall, FSRS_VERSION);
     hooks?.after?.(after, Number(inserted.lastInsertRowid));
     db.exec('COMMIT');
@@ -109,7 +107,7 @@ export function reviewCard(
 }
 export function reviewHistory(db: DatabaseSync, cardId: number): ReviewEvent[] {
   getCard(db, cardId);
-  return db.prepare('SELECT * FROM review_events WHERE card_id = ? ORDER BY id').all(cardId) as unknown as ReviewEvent[];
+  return db.prepare(REVIEW_HISTORY_SQL).all(cardId) as unknown as ReviewEvent[];
 }
 
 /** Reverse the latest active review by restoring its saved pre-review snapshot. */
@@ -125,12 +123,7 @@ export function undoReview(
   db.exec('BEGIN IMMEDIATE');
   try {
     getCard(db, cardId);
-    const latest = db.prepare(`
-      SELECT r.* FROM review_events r
-      WHERE r.card_id = ? AND r.event_type = 'review'
-        AND NOT EXISTS (SELECT 1 FROM review_events u WHERE u.undone_review_id = r.id)
-      ORDER BY r.id DESC LIMIT 1
-    `).get(cardId) as ReviewEvent | undefined;
+    const latest = db.prepare(LATEST_ACTIVE_REVIEW_SQL).get(cardId) as ReviewEvent | undefined;
     if (!latest) throw new ReviewError('No active review to undo.');
     hooks?.before?.(latest.id);
     const current = readSchedule(db, cardId);
@@ -139,11 +132,7 @@ export function undoReview(
     }
     const before: Schedule | null = latest.before_json ? JSON.parse(latest.before_json) as Schedule : null;
     putSchedule(db, cardId, before);
-    db.prepare(`
-      INSERT INTO review_events
-      (card_id, event_type, rating, occurred_at, before_json, after_json, undone_review_id, scheduler_version)
-      VALUES (?, 'undo', NULL, ?, ?, ?, ?, ?)
-    `).run(cardId, timestamp, JSON.stringify(current), before ? JSON.stringify(before) : null,
+    db.prepare(INSERT_UNDO_EVENT_SQL).run(cardId, timestamp, JSON.stringify(current), before ? JSON.stringify(before) : null,
       latest.id, FSRS_VERSION);
     hooks?.after?.(latest.id);
     db.exec('COMMIT');
@@ -152,13 +141,5 @@ export function undoReview(
 }
 export function dueCards(db: DatabaseSync, deckId?: number, now = new Date()): DueCard[] {
   const timestamp = checkedTime(now);
-  const sql = `
-    SELECT c.id, c.deck_id, c.front, s.due_at, COALESCE(s.review_count, 0) AS review_count
-    FROM cards c LEFT JOIN card_schedules s ON s.card_id = c.id
-    LEFT JOIN generated_cards g ON g.card_id=c.id
-    WHERE (g.card_id IS NULL OR g.retired=0)
-      AND (s.due_at IS NULL OR s.due_at <= ?)
-  ` + (deckId === undefined ? '' : ' AND c.deck_id = ?') +
-      ' ORDER BY COALESCE(s.due_at, \'\'), c.id';
-  return db.prepare(sql).all(...(deckId === undefined ? [timestamp] : [timestamp, deckId])) as unknown as DueCard[];
+  return db.prepare(DUE_CARDS_SQL).all(timestamp, deckId ?? null, deckId ?? null) as unknown as DueCard[];
 }

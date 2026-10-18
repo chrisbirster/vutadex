@@ -3,6 +3,26 @@ import { getDeck } from './decks.ts';
 import { reviewCard, undoReview } from './reviews.ts';
 import type { Schedule } from './reviews.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
+import { loadQuery } from '../database/sql.ts';
+
+const ACTIVE_SESSION_SQL = loadQuery('study/active-session.sql');
+const GET_SESSION_SQL = loadQuery('study/get-session.sql');
+const SESSION_COUNTS_SQL = loadQuery('study/session-counts.sql');
+const SKIP_RETIRED_ITEMS_SQL = loadQuery('study/skip-retired-items.sql');
+const HAS_PENDING_ITEM_SQL = loadQuery('study/has-pending-item.sql');
+const COMPLETE_SESSION_SQL = loadQuery('study/complete-session.sql');
+const ABANDON_SESSION_SQL = loadQuery('study/abandon-session.sql');
+const CREATE_SESSION_SQL = loadQuery('study/create-session.sql');
+const CANDIDATES_SQL = loadQuery('study/candidates.sql');
+const INSERT_ITEM_SQL = loadQuery('study/insert-item.sql');
+const NEXT_ITEM_SQL = loadQuery('study/next-item.sql');
+const GET_ITEM_SQL = loadQuery('study/get-item.sql');
+const SKIP_ITEM_SQL = loadQuery('study/skip-item.sql');
+const TOUCH_SESSION_SQL = loadQuery('study/touch-session.sql');
+const COMPLETE_ITEM_SQL = loadQuery('study/complete-item.sql');
+const LAST_DONE_ITEM_SQL = loadQuery('study/last-done-item.sql');
+const REOPEN_ITEM_SQL = loadQuery('study/reopen-item.sql');
+const REOPEN_SESSION_SQL = loadQuery('study/reopen-session.sql');
 
 export type StudyMode = 'due' | 'new' | 'all';
 export type SessionStatus = 'active' | 'completed' | 'abandoned';
@@ -65,37 +85,26 @@ function limits(options: StudyOptions): Required<Omit<StudyOptions, 'deckId'>> {
   return { mode, newLimit, reviewLimit };
 }
 function getActive(db: DatabaseSync): SessionRow | undefined {
-  return db.prepare("SELECT * FROM study_sessions WHERE status = 'active'").get() as SessionRow | undefined;
+  return db.prepare(ACTIVE_SESSION_SQL).get() as SessionRow | undefined;
 }
 function getSessionRow(db: DatabaseSync, sessionId: number): SessionRow {
-  const session = db.prepare('SELECT * FROM study_sessions WHERE id = ?').get(sessionId) as SessionRow | undefined;
+  const session = db.prepare(GET_SESSION_SQL).get(sessionId) as SessionRow | undefined;
   if (!session) throw new StudyError('Study session not found.');
   return session;
 }
 export function sessionSummary(db: DatabaseSync, sessionId: number): StudySession {
   const row = getSessionRow(db, sessionId);
-  const counts = db.prepare(`
-    SELECT COUNT(*) AS total,
-      COALESCE(SUM(status = 'pending'), 0) AS pending,
-      COALESCE(SUM(status = 'done'), 0) AS done,
-      COALESCE(SUM(status = 'skipped'), 0) AS skipped
-    FROM study_session_items WHERE session_id = ?
-  `).get(sessionId) as { total: number; pending: number; done: number; skipped: number };
+  const counts = db.prepare(SESSION_COUNTS_SQL).get(sessionId) as { total: number; pending: number; done: number; skipped: number };
   return { id: row.id, deckId: row.deck_id, mode: row.mode,
     newLimit: row.new_limit, reviewLimit: row.review_limit,
     status: row.status, ...counts };
 }
 
 function finishIfEmpty(db: DatabaseSync, sessionId: number, now: string): void {
-  db.prepare(`
-    UPDATE study_session_items SET status='skipped'
-    WHERE session_id=? AND status='pending' AND card_id IN
-      (SELECT card_id FROM generated_cards WHERE retired=1)
-  `).run(sessionId);
-  const hasPending = db.prepare("SELECT 1 FROM study_session_items WHERE session_id = ? AND status = 'pending' LIMIT 1").get(sessionId);
+  db.prepare(SKIP_RETIRED_ITEMS_SQL).run(sessionId);
+  const hasPending = db.prepare(HAS_PENDING_ITEM_SQL).get(sessionId);
   if (!hasPending) {
-    db.prepare("UPDATE study_sessions SET status='completed', updated_at=? WHERE id=? AND status='active'")
-      .run(now, sessionId);
+    db.prepare(COMPLETE_SESSION_SQL).run(now, sessionId);
   }
 }
 export function openStudySession(
@@ -123,35 +132,15 @@ export function openStudySession(
       return sessionSummary(db, active.id);
     }
     if (behavior === 'resume') throw new StudyError('No unfinished study session to resume.');
-    if (active) db.prepare("UPDATE study_sessions SET status='abandoned', updated_at=? WHERE id=?").run(iso, active.id);
+    if (active) db.prepare(ABANDON_SESSION_SQL).run(iso, active.id);
     if (options.deckId !== undefined) getDeck(db, options.deckId);
-    const created = db.prepare(`
-      INSERT INTO study_sessions(deck_id, mode, new_limit, review_limit, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'active', ?, ?)
-    `).run(options.deckId ?? null, config.mode, config.newLimit, config.reviewLimit, iso, iso);
+    const created = db.prepare(CREATE_SESSION_SQL).run(options.deckId ?? null, config.mode, config.newLimit, config.reviewLimit, iso, iso);
     const sessionId = Number(created.lastInsertRowid);
-    const candidates = db.prepare(`
-      SELECT c.id AS card_id,
-        CASE WHEN s.card_id IS NULL THEN 'new' ELSE 'review' END AS kind,
-        COALESCE(s.review_count, 0) AS review_count,
-        s.last_review_at
-      FROM cards c LEFT JOIN card_schedules s ON s.card_id = c.id
-      LEFT JOIN generated_cards g ON g.card_id = c.id
-      WHERE (g.card_id IS NULL OR g.retired=0)
-        AND (? IS NULL OR c.deck_id = ?)
-        AND (? = 'all' OR (? = 'new' AND s.card_id IS NULL)
-             OR (? = 'due' AND (s.card_id IS NULL OR s.due_at <= ?)))
-      ORDER BY CASE WHEN s.card_id IS NULL THEN 1 ELSE 0 END,
-               s.due_at, c.id
-    `).all(options.deckId ?? null, options.deckId ?? null, config.mode, config.mode, config.mode, iso) as unknown as Candidate[];
+    const candidates = db.prepare(CANDIDATES_SQL).all(options.deckId ?? null, options.deckId ?? null, config.mode, config.mode, config.mode, iso) as unknown as Candidate[];
     let newCount = 0;
     let reviewCount = 0;
     let position = 0;
-    const insert = db.prepare(`
-      INSERT INTO study_session_items
-        (session_id, card_id, position, kind, starting_review_count, starting_last_review_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const insert = db.prepare(INSERT_ITEM_SQL);
     for (const card of candidates) {
       if (card.kind === 'new') {
         if (newCount >= config.newLimit) continue;
@@ -187,17 +176,11 @@ export function finishStudySession(db: DatabaseSync, sessionId: number, now = ne
 
 export function nextStudyItem(db: DatabaseSync, sessionId: number): StudyItem | null {
   getSessionRow(db, sessionId);
-  return db.prepare(`
-    SELECT c.id AS cardId, c.deck_id AS deckId, c.front, c.back, i.kind, i.position
-    FROM study_session_items i JOIN cards c ON c.id = i.card_id
-    LEFT JOIN generated_cards g ON g.card_id=c.id
-    WHERE i.session_id = ? AND i.status = 'pending' AND (g.card_id IS NULL OR g.retired=0)
-    ORDER BY i.position LIMIT 1
-  `).get(sessionId) as StudyItem | undefined ?? null;
+  return db.prepare(NEXT_ITEM_SQL).get(sessionId) as StudyItem | undefined ?? null;
 }
 function requirePending(db: DatabaseSync, sessionId: number, cardId: number): ItemRow {
   if (getSessionRow(db, sessionId).status !== 'active') throw new StudyError('Study session is no longer active.');
-  const item = db.prepare('SELECT * FROM study_session_items WHERE session_id=? AND card_id=?')
+  const item = db.prepare(GET_ITEM_SQL)
     .get(sessionId, cardId) as ItemRow | undefined;
   if (!item || item.status !== 'pending') throw new StudyError('Card already processed in this session.');
   return item;
@@ -207,9 +190,9 @@ export function skipStudyCard(db: DatabaseSync, sessionId: number, cardId: numbe
   db.exec('BEGIN IMMEDIATE');
   try {
     requirePending(db, sessionId, cardId);
-    db.prepare("UPDATE study_session_items SET status='skipped' WHERE session_id=? AND card_id=?")
+    db.prepare(SKIP_ITEM_SQL)
       .run(sessionId, cardId);
-    db.prepare('UPDATE study_sessions SET updated_at=? WHERE id=?').run(iso, sessionId);
+    db.prepare(TOUCH_SESSION_SQL).run(iso, sessionId);
     finishIfEmpty(db, sessionId, iso);
     db.exec('COMMIT');
     return sessionSummary(db, sessionId);
@@ -228,20 +211,16 @@ export function rateStudyCard(
       }
     },
     after: (_after, eventId) => {
-      db.prepare("UPDATE study_session_items SET status='done', review_event_id=? WHERE session_id=? AND card_id=?")
+      db.prepare(COMPLETE_ITEM_SQL)
         .run(eventId, sessionId, cardId);
-      db.prepare('UPDATE study_sessions SET updated_at=? WHERE id=?').run(iso, sessionId);
+      db.prepare(TOUCH_SESSION_SQL).run(iso, sessionId);
       finishIfEmpty(db, sessionId, iso);
     }
   });
 }
 export function undoLastStudyReview(db: DatabaseSync, sessionId: number, now = new Date()): number {
   const iso = timestamp(now);
-  const row = db.prepare(`
-    SELECT card_id, review_event_id FROM study_session_items
-    WHERE session_id=? AND status='done' AND review_event_id IS NOT NULL
-    ORDER BY review_event_id DESC LIMIT 1
-  `).get(sessionId) as { card_id: number; review_event_id: number } | undefined;
+  const row = db.prepare(LAST_DONE_ITEM_SQL).get(sessionId) as { card_id: number; review_event_id: number } | undefined;
   if (!row) throw new StudyError('There is no session review to undo.');
   // Both FSRS rollback and queue reopening are committed in one transaction.
   undoReview(db, row.card_id, now, {
@@ -251,9 +230,9 @@ export function undoLastStudyReview(db: DatabaseSync, sessionId: number, now = n
       if (session.status !== 'active' && session.status !== 'completed') throw new StudyError('Session was abandoned.');
     },
     after: () => {
-      db.prepare("UPDATE study_session_items SET status='pending', review_event_id=NULL WHERE session_id=? AND card_id=?")
+      db.prepare(REOPEN_ITEM_SQL)
         .run(sessionId, row.card_id);
-      db.prepare("UPDATE study_sessions SET status='active', updated_at=? WHERE id=?")
+      db.prepare(REOPEN_SESSION_SQL)
         .run(iso, sessionId);
     }
   });
