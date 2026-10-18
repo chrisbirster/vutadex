@@ -1,6 +1,6 @@
 # Vutadex
 
-A local-first TypeScript terminal flashcard application. No server, Fly.io, or cloud secrets required. The FSRS scheduler and additional study modes are planned, **not implemented**.
+A local-first TypeScript terminal flashcard application. No server, Fly.io, or cloud secrets required. FSRS-7 scheduling is implemented; interactive study modes are planned.
 
 ## Requirements
 Node.js 26 and npm.

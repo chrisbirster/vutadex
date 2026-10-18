@@ -1,7 +1,7 @@
 # Vutadex roadmap
 
 Current: M0 merged to main (#15); M1 merged to main (#18); M2 merged to main (#22).
-M3 FSRS-7 implementation merged into dev (#24, #25); integration acceptance and milestone release pending.
+M3 FSRS-7 implementation and acceptance tests merged into dev (#24, #25, #26); release pending.
 M4–M7 pending. All milestone releases are merged from dev to main after required cross-platform CI.
 
 ## M0 — Foundation
@@ -23,7 +23,7 @@ M4–M7 pending. All milestone releases are merged from dev to main after requir
 - [x] SQLite schema v2, per-card schedule snapshots, append-only review and undo events.
 - [x] Again/Hard/Good/Easy review, due query, history and undo CLI.
 - [x] Deterministic service tests and CLI cross-process integration test.
-- [ ] Final acceptance CI and milestone release PR merged to main.
+- [x] M3 feature and acceptance PRs #24-26 passed required cross-platform CI and merged to dev.\n- [ ] Milestone release PR merged to main.
 
 ## M4 — Study Sessions
 Interactive due-card sessions, reveal/rate, limits, keyboard navigation, resume, integration tests.
