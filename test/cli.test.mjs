@@ -10,7 +10,9 @@ const root = new URL('../index.ts', import.meta.url).pathname;
 function run(args, home) {
   return spawnSync(process.execPath, [root, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, XDG_DATA_HOME: join(home, 'data') },
+    env: home
+      ? { ...process.env, HOME: home, XDG_DATA_HOME: join(home, 'data') }
+      : process.env,
   });
 }
 
