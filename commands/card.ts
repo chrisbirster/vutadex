@@ -3,9 +3,11 @@ import process from 'node:process';
 import { getDatabase } from '../database/index.ts';
 import { getDeck, DeckError } from '../services/decks.ts';
 import { CardError, parsePositiveId, addCard, editCard, getCard, listCards, deleteCard } from '../services/cards.ts';
+import { ReviewError, reviewCard, undoReview, getSchedule, reviewHistory } from '../services/reviews.ts';
+import type { Rating } from '../fsrs/algorithm.ts';
 
 function usage(): number {
-  console.error('Usage: card add <deck-id> [--front <text> --back <text>] | list <deck-id> [--search <query>] | search <deck-id> <query> | show <card-id> | edit <card-id> [--front <text>] [--back <text>] | delete <card-id> [--yes]');
+  console.error('Usage: card add <deck-id> [--front <text> --back <text>] | list <deck-id> [--search <query>] | search <deck-id> <query> | show <card-id> | edit <card-id> [--front <text>] [--back <text>] | delete <card-id> [--yes] | review <card-id> <again|hard|good|easy> | undo <card-id> | history <card-id> | schedule <card-id>');
   return 1;
 }
 function fields(args: string[]): { front?: string; back?: string } | null {
@@ -93,6 +95,30 @@ export async function runCardCommand(subcommand: string | undefined, args: strin
     }
     const db = getDatabase();
     try {
+      if (['review', 'undo', 'history', 'schedule'].includes(subcommand)) {
+        if (args.length < 1 || (subcommand === 'review' ? args.length !== 2 : args.length !== 1)) return usage();
+        const id = parsePositiveId(args[0]);
+        if (subcommand === 'review') {
+          const rating = ({ again: 1, hard: 2, good: 3, easy: 4 } as Record<string, Rating>)[args[1]!.toLowerCase()];
+          if (!rating) return usage();
+          const result = reviewCard(db, id, rating);
+          console.log(`Card ${id} reviewed. Next due ${result.dueAt}.`);
+        } else if (subcommand === 'undo') {
+          const restored = undoReview(db, id);
+          console.log(restored ? `Undid latest review. Next due ${restored.dueAt}.` : 'Undid first review. Card is new.');
+        } else if (subcommand === 'schedule') {
+          const schedule = getSchedule(db, id);
+          console.table(schedule ?? { status: 'new', due: 'now' });
+        } else {
+          console.table(reviewHistory(db, id).map(event => ({
+            id: event.id, kind: event.event_type,
+            rating: event.rating === null ? '-' : ['', 'Again', 'Hard', 'Good', 'Easy'][event.rating],
+            at: event.occurred_at, elapsed_days: event.elapsed_days,
+            reverted_review_id: event.undone_review_id
+          })));
+        }
+        return 0;
+      }
       if (subcommand === 'show') {
         if (args.length !== 1) return usage();
         console.table(getCard(db, parsePositiveId(args[0])));
@@ -115,7 +141,7 @@ export async function runCardCommand(subcommand: string | undefined, args: strin
       return usage();
     } finally { db.close(); }
   } catch (error) {
-    if (error instanceof CardError || error instanceof DeckError) {
+    if (error instanceof CardError || error instanceof DeckError || error instanceof ReviewError) {
       console.error(error.message);
       return 1;
     }

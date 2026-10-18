@@ -28,7 +28,7 @@ CARDS
   card add <deck-id> --front <text> --back <text>
   card show <id>        View a flashcard
   card edit <id> --front/--back <text>
-  card delete <id> [--yes] Delete a flashcard
+  card delete <id> [--yes] Delete a flashcard\n  card review <id> <rating> Record Again/Hard/Good/Easy\n  card undo <id>        Undo last review\n  card schedule <id>    Show FSRS-7 memory and due date\n  card history <id>     Show review/undo history
 
 STUDY
   study                 Review due cards
@@ -40,7 +40,7 @@ STUDY
 PROGRESS
   stats                 Show learning statistics
   stats <deck>          Show deck statistics
-  due                   Show due cards
+  due [deck-id]         Show due and new cards
 
 OPTIONS
   -h, --help            Show help
