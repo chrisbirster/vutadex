@@ -1,6 +1,6 @@
 # Vutadex
 
-A local-first TypeScript terminal flashcard application. No server, Fly.io, or cloud secrets required. FSRS-7 scheduling is implemented; interactive study modes are planned.
+A local-first TypeScript terminal flashcard application. No server, Fly.io, or cloud secrets required. FSRS-7 scheduling and interactive study sessions are implemented; additional M5 study methods are planned.
 
 ## Requirements
 Node.js 26 and npm.
@@ -16,7 +16,7 @@ node index.ts deck create "Spanish"
 node index.ts deck list
 ```
 
-Implemented commands: `help`, `version`, `deck list`, `deck create`, `deck show`, `deck rename`, `deck describe`, and `deck delete`. See [M1 deck documentation](docs/m1.md). Card commands are now implemented too: `card add`, `card list`, `card show`, `card edit`, `card search`, and `card delete`. See [M2 card documentation](docs/m2.md). Interactive study sessions remain a roadmap item; FSRS-7 scheduling, review history and undo are implemented.
+Implemented commands: `help`, `version`, `deck list`, `deck create`, `deck show`, `deck rename`, `deck describe`, and `deck delete`. See [M1 deck documentation](docs/m1.md). Card commands are now implemented too: `card add`, `card list`, `card show`, `card edit`, `card search`, and `card delete`. See [M2 card documentation](docs/m2.md). Interactive study sessions, FSRS-7 scheduling, review history and undo are implemented.
 
 ## Local database
 SQLite is stored at:
@@ -47,3 +47,14 @@ node index.ts card undo 1
 ```
 
 See [M3 FSRS-7 documentation](docs/m3.md). The engine is pure TypeScript with a SQLite v2 migration. It uses a fixed default 90% target retention; personalized weight fitting is not part of M3.
+
+## Interactive study sessions
+
+```sh
+node index.ts study
+node index.ts study 1 --new-limit 10 --review-limit 50
+node index.ts study --resume
+node index.ts study 1 --restart
+```
+
+Space/Enter reveals the back; press 1–4 to rate, s to skip, u to undo or q to pause. The selected queue and progress survive restarts. See [M4 study session guide](docs/m4.md).
