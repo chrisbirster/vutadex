@@ -41,3 +41,22 @@ test('deck creation persists to subsequent invocation', () => {
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('deck commands persist, validate duplicates and confirm deletion', () => {
+  const home = mkdtempSync(join(tmpdir(), 'vutadex-m1-'));
+  try {
+    const create = run(['deck', 'create', 'History', '--description', 'Dates'], home);
+    assert.equal(create.status, 0, create.stderr);
+    assert.match(run(['deck', 'show', '1'], home).stdout, /Dates/);
+    assert.equal(run(['deck', 'create', 'history'], home).status, 1);
+    assert.equal(run(['deck', 'rename', '1', 'World History'], home).status, 0);
+    assert.equal(run(['deck', 'describe', '1', 'Ancient'], home).status, 0);
+    assert.match(run(['deck', 'show', '1'], home).stdout, /Ancient/);
+    assert.equal(run(['deck', 'delete', '1'], home).status, 1);
+    assert.match(run(['deck', 'show', '1'], home).stdout, /World History/);
+    assert.equal(run(['deck', 'delete', '1', '--yes'], home).status, 0);
+    assert.equal(run(['deck', 'show', '1'], home).status, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
