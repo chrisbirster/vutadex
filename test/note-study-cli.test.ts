@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const entry=fileURLToPath(new URL('../index.ts',import.meta.url));
-function fixture(fn:(home:string,run:(args:string[],input?:string)=>ReturnType<typeof spawnSync>)=>void):void{
+function fixture(fn:(home:string,run:(args:string[],input?:string)=>SpawnSyncReturns<string>)=>void):void{
  const home=mkdtempSync(join(tmpdir(),'vutadex-m5-interact-'));
  try{
   const run=(args:string[],input='')=>spawnSync(process.execPath,[entry,...args],{
