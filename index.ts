@@ -3,6 +3,8 @@ import { handleHelpCommand } from './commands/help.ts';
 import { handleVersionCommand } from './commands/version.ts';
 import { runDeckCommand } from './commands/deck.ts';
 import { runCardCommand } from './commands/card.ts';
+import { runDueCommand } from './commands/due.ts';
+import { runStudyCommand } from './commands/study.ts';
 
 export async function main(args: string[]): Promise<number> {
   const [command, subcommand, ...rest] = args;
@@ -20,9 +22,11 @@ export async function main(args: string[]): Promise<number> {
       return handleVersionCommand();
     case 'card':
       return runCardCommand(subcommand, rest);
-    case 'study':
-    case 'stats':
     case 'due':
+      return runDueCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
+    case 'study':
+      return runStudyCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
+    case 'stats':
       console.error(`Command not implemented yet: ${command}`);
       return 1;
     default:

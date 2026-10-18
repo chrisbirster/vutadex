@@ -1,43 +1,39 @@
 # Vutadex roadmap
 
-Status: M0 released (#15); M1 released (#18); M2 implemented in dev (#20), pending M2 release. M3–M7 pending.
+M0 released to main (#15); M1 released (#18); M2 released (#22); M3 released (#29).
+M4 interactive study sessions implemented in dev (#30, #31), final acceptance and release pending.
+Feature branches target dev; milestone release PRs merge dev into main after required CI.
 
 ## M0 — Foundation
-- [x] Native TypeScript CLI, SQLite, basic test harness.
-- [x] Separate CLI, database, and path modules.
-- [x] Untrack committed `node_modules`.
-- [x] Add CI for `dev` and `main` on macOS, Windows, Linux.
-- [x] Add TypeScript type checks and SQLite schema version migration.
-- [x] Contributing and branch-flow docs.
-- [x] Initial foundation PR #13 merged into dev with all three OS checks green.
-- [x] Lightweight TypeScript-only lint/format scripts added in a feature PR (pending checks and merge).
-- [x] M0 quality gate CI and release PR #15 completed.
-- [x] Branch rules require CI and PRs; 0 mandatory approvals (see docs/quality-gates.md).
+- [x] Node 26 TypeScript CLI, SQLite, modularization, strict type checks, tests and CI.
+- [x] Released to main (#15).
 
-## M1 — Decks
-- [x] Create/list/show/rename/delete deck commands.
-- [x] Descriptions and clear-description command.
-- [x] Case-insensitive duplicate-name validation and ID validation.
-- [x] Interactive deletion confirmation and explicit --yes automation override.
-- [x] TypeScript unit and CLI tests.
-- [x] M1 feature PR #16 passed Ubuntu/macOS/Windows CI and merged to dev.
-- [x] M1 released to main in #18.
+## M1 — Deck Management
+- [x] CRUD, descriptions, validation, confirmations and tests.
+- [x] Released to main (#18).
 
-## M2 — Cards
-- [x] Add/edit/list/show/delete, multiline prompts, search, validation, service and CLI tests.
-- [x] M2 implementation PR #20 merged to dev, Linux/macOS/Windows CI green.\n- [ ] M2 release PR merged to main.
+## M2 — Card Management
+- [x] CRUD, multiline content, search and tests.
+- [x] Released to main (#22).
 
-## M3 — FSRS
-Select FSRS library/version; schema for scheduling state and review history; Again/Hard/Good/Easy, transactional reviews, rollback/undo, time-zone tests.
+## M3 — FSRS-7 Scheduling
+- [x] TypeScript engine, golden-vector parity, 34 parameters, SQLite v2 state/history and due scheduling.
+- [x] Released to main (#29).
 
-## M4 — Study
-Interactive due-card sessions, reveal/rate, limits, keyboard navigation, resume, integration tests.
+## M4 — Interactive Studying
+- [x] Due/new/all deck-scoped queues; configurable new/review caps.
+- [x] Reveal before rating, single-key terminal shortcuts, skip/quit/undo.
+- [x] Durable queue persistence, resume/restart and SQLite v3 migration.
+- [x] Atomic FSRS rating and queue completion; protection from stale or duplicate review.
+- [x] TypeScript unit and cross-process CLI integration tests on Ubuntu/macOS/Windows.
+- [x] Feature PRs #30 and #31 merged into dev with green CI.
+- [ ] M4 acceptance/release PR merged to main.
 
-## M5 — Methods
-Typing, multiple choice, shuffle, cram; explicit scheduling effects; tests.
+## M5 — Study Methods
+Typed answers, multiple-choice, shuffle and cram without scheduling; document each method's review effects and add tests.
 
-## M6 — Progress and backup
-Stats, due forecast, retention metrics, export/import, restore and round-trip tests.
+## M6 — Progress and Portability
+Statistics, due forecast, review history and streaks, safe import/export/backup and restore tests.
 
-## M7 — Distribution
-Installable package, OS validation, migration safety, docs, tagged releases, v1.0 acceptance.
+## M7 — Packaging and v1.0
+Installable CLI, OS verification, upgrade safety, complete docs, tagged releases, v1.0 regression.
