@@ -7,6 +7,7 @@ import { openStudySession, nextStudyItem, rateStudyCard, sessionSummary,
 import type { StudyOptions, StudySession } from '../services/study.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
 import { makeStudyInput } from './study-input.ts';
+import { interactionForCard,needsAnswerInput,evaluateAnswer,answerPrompt } from '../services/study-interactions.ts';
 
 function usage(): number {
   console.error('Usage: study [deck-id] [--new | --all] [--new-limit N] [--review-limit N] [--restart] | study --resume');
@@ -93,7 +94,28 @@ export async function runStudyCommand(args: string[]): Promise<number> {
         console.log('Front:\n' + item.front);
         let restartCard = false;
         let revealed = false;
+        const interaction = interactionForCard(db,item.cardId);
         while (!restartCard) {
+          if (!revealed && needsAnswerInput(interaction)) {
+            const response = await input.askText(answerPrompt(interaction));
+            if (response === null || response.trim() === '/quit') {
+              console.log('Session paused. Run study --resume to continue.');
+              return 0;
+            }
+            if (response.trim() === '/skip') {
+              const updated = skipStudyCard(db, session.id, item.cardId);
+              console.log('Skipped. ' + progress(updated) + '.');
+              restartCard = true;
+              continue;
+            }
+            const result = evaluateAnswer(interaction,response);
+            console.log(result.correct?'Correct answer.':'Not quite.');
+            console.log('Expected: ' + result.expected);
+            console.log('Back:\n' + item.back);
+            console.log('Choose your own FSRS rating; correctness does not automatically set Easy.');
+            revealed = true;
+            continue;
+          }
           const action = await input.ask(revealed
             ? 'Rating [1 Again / 2 Hard / 3 Good / 4 Easy] (s skip, u undo, q quit): '
             : 'Reveal [Space/Enter] (s skip, u undo, q quit): ');
