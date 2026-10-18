@@ -6,7 +6,7 @@ import { createDeck, deleteDeck } from '../services/decks.ts';
 import { addCard } from '../services/cards.ts';
 import { getSchedule, reviewCard, reviewHistory } from '../services/reviews.ts';
 import { openStudySession, nextStudyItem, rateStudyCard, skipStudyCard,
-  sessionSummary, undoLastStudyReview } from '../services/study.ts';
+  sessionSummary, undoLastStudyReview, finishStudySession } from '../services/study.ts';
 
 function setup(): { db: DatabaseSync; deckId: number; cards: number[] } {
   const db = new DatabaseSync(':memory:');
@@ -97,5 +97,51 @@ test('deleted cards are removed from pending queue by foreign keys', () => {
     deleteDeck(db, deckId);
     assert.equal(nextStudyItem(db, session.id), null);
     assert.equal(sessionSummary(db, session.id).total, 0);
+  } finally { db.close(); }
+});
+
+test('v2 database migrates to v3 without losing FSRS state and review events', () => {
+  const { db, cards } = setup();
+  try {
+    const id = cards[0]!;
+    reviewCard(db, id, 3, new Date('2026-02-03T00:00:00Z'));
+    const schedule = getSchedule(db, id);
+    const events = reviewHistory(db, id);
+    // Re-create the exact v2 -> v3 starting state while retaining M3 data.
+    db.exec('DROP TABLE study_session_items; DROP TABLE study_sessions; PRAGMA user_version = 2');
+    migrate(db);
+    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version: number}).user_version, 3);
+    assert.deepEqual(getSchedule(db, id), schedule);
+    assert.deepEqual(reviewHistory(db, id), events);
+    const session = openStudySession(db, {mode: 'all', newLimit: 0, reviewLimit: 1});
+    assert.equal(session.total, 1);
+  } finally { db.close(); }
+});
+test('deleted queued cards leave a recoverable session with no phantom reviews', () => {
+  const { db, deckId } = setup();
+  try {
+    const session = openStudySession(db, {deckId, newLimit: 1});
+    deleteDeck(db, deckId);
+    assert.equal(nextStudyItem(db, session.id), null);
+    const finished = finishStudySession(db, session.id);
+    assert.equal(finished.status, 'completed');
+    const replacement = openStudySession(db);
+    assert.notEqual(replacement.id, session.id);
+    assert.equal(replacement.status, 'completed');
+  } finally { db.close(); }
+});
+test('all mode includes a not-due reviewed card while new mode excludes it', () => {
+  const { db, deckId, cards } = setup();
+  try {
+    const now = new Date('2026-03-01T00:00:00Z');
+    reviewCard(db, cards[0]!, 3, now);
+    const onlyNew = openStudySession(db, {deckId, mode: 'new', newLimit: 2});
+    assert.equal(onlyNew.total, 2);
+    openStudySession(db, {deckId, mode: 'all', newLimit: 0, reviewLimit: 1}, 'restart', now);
+    const all = openStudySession(db, {}, 'resume');
+    assert.equal(all.total, 1);
+    assert.equal(nextStudyItem(db, all.id)?.cardId, cards[0]);
+    const due = openStudySession(db, {deckId, mode: 'due', newLimit: 0}, 'restart', now);
+    assert.equal(due.total, 0);
   } finally { db.close(); }
 });
