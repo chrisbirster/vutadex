@@ -1,6 +1,6 @@
 # Vutadex roadmap
 
-Status: M0 code foundation implemented; verification, owner rules, and milestone release are pending. M1–M7 pending. A milestone is complete only after its acceptance tests pass and its release PR is approved.
+Status: M0 released to main (#15), branch rules active. M1 implementation in progress; M2–M7 pending. A milestone is complete only after its acceptance tests pass and its release PR is approved.
 
 ## M0 — Foundation
 - [x] Native TypeScript CLI, SQLite, basic test harness.
@@ -15,7 +15,7 @@ Status: M0 code foundation implemented; verification, owner rules, and milestone
 - [ ] Branch rules requiring CI and reviews configured by repository owner (see docs/quality-gates.md).
 
 ## M1 — Decks
-Create/list/show/rename/delete, duplicate-name policy, destructive confirmation, tests.
+- [x] Create/list/show/rename/delete deck commands.\n- [x] Descriptions and clear-description command.\n- [x] Case-insensitive duplicate-name validation and ID validation.\n- [x] Interactive deletion confirmation and explicit --yes automation override.\n- [x] TypeScript unit and CLI tests.\n- [ ] PR CI green and milestone release to main.
 
 ## M2 — Cards
 Add/edit/list/show/delete, multiline text, search, validation, tests.

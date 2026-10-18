@@ -2,7 +2,7 @@ import process from 'node:process';
 import { help } from './commands/help.ts';
 import { runDeckCommand } from './commands/deck.ts';
 
-export function main(args: string[]): number {
+export async function main(args: string[]): Promise<number> {
   const [command, subcommand, ...rest] = args;
   switch (command) {
     case undefined:
@@ -30,4 +30,4 @@ export function main(args: string[]): number {
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(2));
