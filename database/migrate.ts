@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { listMigrations, loadMigration, loadQuery, queryOne } from './sql.ts';
+import { listMigrations as walkMigrationsDirectory, loadMigration, loadQuery, queryOne } from './sql.ts';
 
 const USER_VERSION_SQL = loadQuery('schema/user-version.sql');
 
@@ -44,7 +44,7 @@ function applyMigrations(db: DatabaseSync, currentMigrationVersion: number, migr
 }
 
 export function migrate(db: DatabaseSync): void {
-  const migrationFiles = listMigrations();
-  const currentMigrationVersion = checkCurrentMigrationVersion(db, migrationFiles);
-  applyMigrations(db, currentMigrationVersion, migrationFiles)
+  const migrationFilesFound = walkMigrationsDirectory();
+  const currentMigrationVersion = checkCurrentMigrationVersion(db, migrationFilesFound);
+  applyMigrations(db, currentMigrationVersion, migrationFilesFound)
 }
