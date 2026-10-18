@@ -102,7 +102,11 @@ export function openStudySession(
   const config = limits(options);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const active = getActive(db);
+    let active = getActive(db);
+    if (active) {
+      finishIfEmpty(db, active.id, iso);
+      active = getActive(db);
+    }
     if (active && behavior !== 'restart') {
       if (behavior === 'auto' && (
         active.deck_id !== (options.deckId ?? null) || active.mode !== config.mode ||
@@ -159,6 +163,21 @@ export function openStudySession(
     throw error;
   }
 }
+/** Finalize a queue whose last pending item was deleted outside the session. */
+export function finishStudySession(db: DatabaseSync, sessionId: number, now = new Date()): StudySession {
+  const iso = timestamp(now);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    getSessionRow(db, sessionId);
+    finishIfEmpty(db, sessionId, iso);
+    db.exec('COMMIT');
+    return sessionSummary(db, sessionId);
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export function nextStudyItem(db: DatabaseSync, sessionId: number): StudyItem | null {
   getSessionRow(db, sessionId);
   return db.prepare(`
