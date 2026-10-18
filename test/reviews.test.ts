@@ -16,7 +16,7 @@ function setup(): { db: DatabaseSync; cardId: number } {
   return { db, cardId: card.id };
 }
 
-test('v1->v2 database upgrades in place and migration is idempotent', () => {
+test('v1 database upgrades through latest schema and migration is idempotent', () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('PRAGMA user_version=1');
@@ -26,7 +26,7 @@ test('v1->v2 database upgrades in place and migration is idempotent', () => {
     migrate(db);
     migrate(db);
     const version = db.prepare('PRAGMA user_version').get() as { user_version: number };
-    assert.equal(version.user_version, 2);
+    assert.equal(version.user_version, 3);
     assert.equal((db.prepare('SELECT front FROM cards WHERE id=1').get() as { front: string }).front, 'old');
   } finally { db.close(); }
 });
