@@ -132,8 +132,7 @@ export function openStudySession(
              OR (? = 'due' AND (s.card_id IS NULL OR s.due_at <= ?)))
       ORDER BY CASE WHEN s.card_id IS NULL THEN 1 ELSE 0 END,
                s.due_at, c.id
-    `).all(options.deckId ?? null, options.deckId ?? null, config.mode, config.mode, config.mode, iso)
-      as unknown as Candidate[];
+    `).all(options.deckId ?? null, options.deckId ?? null, config.mode, config.mode, config.mode, iso) as unknown as Candidate[];
     let newCount = 0;
     let reviewCount = 0;
     let position = 0;
