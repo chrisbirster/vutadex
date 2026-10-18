@@ -3,7 +3,7 @@ import { parsePositiveId } from '../services/cards.ts';
 import { DeckError } from '../services/decks.ts';
 import { ReviewError } from '../services/reviews.ts';
 import { openStudySession, nextStudyItem, rateStudyCard, sessionSummary,
-  skipStudyCard, undoLastStudyReview, StudyError } from '../services/study.ts';
+  skipStudyCard, undoLastStudyReview, finishStudySession, StudyError } from '../services/study.ts';
 import type { StudyOptions, StudySession } from '../services/study.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
 import { makeStudyInput } from './study-input.ts';
@@ -74,7 +74,7 @@ export async function runStudyCommand(args: string[]): Promise<number> {
       while (true) {
         const item = nextStudyItem(db, session.id);
         if (!item) {
-          const finished = sessionSummary(db, session.id);
+          const finished = finishStudySession(db, session.id);
           console.log('Session complete: ' + progress(finished) + '.');
           if (!finished.done) return 0;
           const action = await input.ask('Press u to undo the last rating, or Enter/q to finish: ');
