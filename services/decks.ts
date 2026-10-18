@@ -25,7 +25,7 @@ function ensureUnique(db: DatabaseSync, name: string, exceptId?: number): void {
 
 export function getDeck(db: DatabaseSync, id: number): Deck {
   const deck = db.prepare(`
-    SELECT d.*, (SELECT COUNT(*) FROM cards WHERE deck_id = d.id) AS card_count
+    SELECT d.*, (SELECT COUNT(*) FROM cards c LEFT JOIN generated_cards g ON g.card_id=c.id WHERE c.deck_id=d.id AND (g.card_id IS NULL OR g.retired=0)) AS card_count
     FROM decks d WHERE d.id = ?
   `).get(id) as Deck | undefined;
   if (!deck) throw new DeckError(`Deck ${id} not found.`);
@@ -34,7 +34,7 @@ export function getDeck(db: DatabaseSync, id: number): Deck {
 
 export function listDecks(db: DatabaseSync): Deck[] {
   return db.prepare(`
-    SELECT d.*, (SELECT COUNT(*) FROM cards WHERE deck_id = d.id) AS card_count
+    SELECT d.*, (SELECT COUNT(*) FROM cards c LEFT JOIN generated_cards g ON g.card_id=c.id WHERE c.deck_id=d.id AND (g.card_id IS NULL OR g.retired=0)) AS card_count
     FROM decks d ORDER BY name COLLATE NOCASE, id
   `).all() as unknown as Deck[];
 }
