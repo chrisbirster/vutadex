@@ -1,15 +1,20 @@
 {
   "name": "vutadex",
-  "version": "1.0.0",
-  "description": "Local-first terminal flashcards with spaced repetition",
+  "version": "0.1.0",
+  "description": "Local-first TypeScript flashcards CLI",
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "index.js",
+  "main": "index.ts",
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "lint": "node --experimental-strip-types scripts/style.ts --check",
+    "format": "node --experimental-strip-types scripts/style.ts --write"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5"
+    "@types/node": "^26.6.5",
+    "typescript": "5.9.3"
   }
 }

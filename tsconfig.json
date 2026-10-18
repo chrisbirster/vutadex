@@ -1,33 +1,23 @@
 {
   "compilerOptions": {
-    // Base Options recommended for all projects
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "target": "es2022",
-    "allowJs": true,
-    "resolveJsonModule": true,
-    "moduleDetection": "force",
-    "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    // Enable strict type checking so you can catch bugs early
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
-    "allowImportingTsExtensions": true,
-    // We are not transpiling, so preserve our source code and do not emit files
-    "module": "preserve",
     "noEmit": true,
-    // Include the DOM types
-   "lib": [
-      "es2022",
-      "dom",
-      "dom.iterable"
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": [
+      "node"
     ]
   },
-  // Include the necessary files for your project
   "include": [
-    "**/*.ts",
-    "**/*.tsx"
+    "index.ts",
+    "commands/**/*.ts",
+    "database/**/*.ts",
+    "utils/**/*.ts",
+    "test/**/*.ts"
   ],
   "exclude": [
     "node_modules"

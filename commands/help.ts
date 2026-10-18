@@ -54,4 +54,3 @@ EXAMPLES
 `
   console.log(output);
 }
-
