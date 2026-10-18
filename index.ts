@@ -2,6 +2,7 @@ import process from 'node:process';
 import { help } from './commands/help.ts';
 import { runDeckCommand } from './commands/deck.ts';
 import { runCardCommand } from './commands/card.ts';
+import { runNoteCommand } from './commands/note.ts';
 import { runDueCommand } from './commands/due.ts';
 import { runStudyCommand } from './commands/study.ts';
 
@@ -23,6 +24,8 @@ export async function main(args: string[]): Promise<number> {
       return 0;
     case 'card':
       return runCardCommand(subcommand, rest);
+    case 'note':
+      return runNoteCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'due':
       return runDueCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'study':
