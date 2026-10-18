@@ -1,5 +1,6 @@
 import process from 'node:process';
-import { help } from './commands/help.ts';
+import { handleHelpCommand } from './commands/help.ts';
+import { handleVersionCommand } from './commands/version.ts';
 import { runDeckCommand } from './commands/deck.ts';
 import { runCardCommand } from './commands/card.ts';
 import { runNoteCommand } from './commands/note.ts';
@@ -14,15 +15,13 @@ export async function main(args: string[]): Promise<number> {
     case 'help':
     case '-h':
     case '--help':
-      help();
-      return 0;
+      return handleHelpCommand();
     case 'deck':
       return runDeckCommand(subcommand, rest);
     case 'version':
     case '-v':
     case '--version':
-      console.log('Vutadex v0.5.0');
-      return 0;
+      return handleVersionCommand();
     case 'card':
       return runCardCommand(subcommand, rest);
     case 'note':
