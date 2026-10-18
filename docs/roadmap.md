@@ -1,6 +1,6 @@
 # Vutadex roadmap
 
-Status: M0 released to main (#15), branch rules active. M1 implemented in dev (#16), pending M1 release PR; M2–M7 pending. A milestone is complete only after its acceptance tests pass and its release PR is approved.
+Status: M0 released (#15); M1 released (#18); M2 implemented in dev (#20), pending M2 release. M3–M7 pending.
 
 ## M0 — Foundation
 - [x] Native TypeScript CLI, SQLite, basic test harness.
@@ -11,14 +11,21 @@ Status: M0 released to main (#15), branch rules active. M1 implemented in dev (#
 - [x] Contributing and branch-flow docs.
 - [x] Initial foundation PR #13 merged into dev with all three OS checks green.
 - [x] Lightweight TypeScript-only lint/format scripts added in a feature PR (pending checks and merge).
-- [ ] Final M0 quality gate CI and release PR reviewed.
-- [ ] Branch rules requiring CI and reviews configured by repository owner (see docs/quality-gates.md).
+- [x] M0 quality gate CI and release PR #15 completed.
+- [x] Branch rules require CI and PRs; 0 mandatory approvals (see docs/quality-gates.md).
 
 ## M1 — Decks
-- [x] Create/list/show/rename/delete deck commands.\n- [x] Descriptions and clear-description command.\n- [x] Case-insensitive duplicate-name validation and ID validation.\n- [x] Interactive deletion confirmation and explicit --yes automation override.\n- [x] TypeScript unit and CLI tests.\n- [x] M1 feature PR #16 passed Ubuntu/macOS/Windows CI and merged to dev.\n- [ ] M1 release PR merged to main.
+- [x] Create/list/show/rename/delete deck commands.
+- [x] Descriptions and clear-description command.
+- [x] Case-insensitive duplicate-name validation and ID validation.
+- [x] Interactive deletion confirmation and explicit --yes automation override.
+- [x] TypeScript unit and CLI tests.
+- [x] M1 feature PR #16 passed Ubuntu/macOS/Windows CI and merged to dev.
+- [x] M1 released to main in #18.
 
 ## M2 — Cards
-- [x] Add/edit/list/show/delete, multiline prompts, search, validation, service and CLI tests.\n- [ ] M2 release PR merged to main.
+- [x] Add/edit/list/show/delete, multiline prompts, search, validation, service and CLI tests.
+- [x] M2 implementation PR #20 merged to dev, Linux/macOS/Windows CI green.\n- [ ] M2 release PR merged to main.
 
 ## M3 — FSRS
 Select FSRS library/version; schema for scheduling state and review history; Again/Hard/Good/Easy, transactional reviews, rollback/undo, time-zone tests.
