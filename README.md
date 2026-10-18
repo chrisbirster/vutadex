@@ -16,7 +16,7 @@ node index.ts deck create "Spanish"
 node index.ts deck list
 ```
 
-Implemented commands: `help`, `version`, `deck list`, and `deck create`. Other features in help are roadmap items.
+Implemented commands: `help`, `version`, `deck list`, `deck create`, `deck show`, `deck rename`, `deck describe`, and `deck delete`. See [M1 deck documentation](docs/m1.md). Other features in help are roadmap items.
 
 ## Local database
 SQLite is stored at:
