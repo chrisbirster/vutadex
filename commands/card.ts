@@ -40,9 +40,21 @@ export async function runCardCommand(subcommand: string | undefined, args: strin
       const id = parsePositiveId(args[0]);
       const opts = fields(args.slice(1));
       if (!opts) return usage();
-      const values = subcommand === 'add' && opts.front === undefined && opts.back === undefined
-        ? await interactiveFields()
-        : opts;
+      let values = opts;
+      if (opts.front === undefined && opts.back === undefined) {
+        if (subcommand === 'add') {
+          values = await interactiveFields();
+        } else {
+          const existingDb = getDatabase();
+          let existing: { front: string; back: string };
+          try {
+            existing = getCard(existingDb, id);
+          } finally {
+            existingDb.close();
+          }
+          values = await interactiveFields(existing);
+        }
+      }
       const db = getDatabase();
       try {
         if (subcommand === 'add') {
