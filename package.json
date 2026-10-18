@@ -1,13 +1,13 @@
 {
   "name": "vutadex",
   "version": "1.0.0",
-  "description": "flashcards",
+  "description": "Local-first terminal flashcards with spaced repetition",
   "license": "ISC",
   "author": "",
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5"
