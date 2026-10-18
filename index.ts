@@ -2,6 +2,7 @@ import process from 'node:process';
 import { help } from './commands/help.ts';
 import { runDeckCommand } from './commands/deck.ts';
 import { runCardCommand } from './commands/card.ts';
+import { runDueCommand } from './commands/due.ts';
 
 export async function main(args: string[]): Promise<number> {
   const [command, subcommand, ...rest] = args;
@@ -21,9 +22,10 @@ export async function main(args: string[]): Promise<number> {
       return 0;
     case 'card':
       return runCardCommand(subcommand, rest);
+    case 'due':
+      return runDueCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'study':
     case 'stats':
-    case 'due':
       console.error(`Command not implemented yet: ${command}`);
       return 1;
     default:
