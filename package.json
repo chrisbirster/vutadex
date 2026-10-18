@@ -9,7 +9,9 @@
   "scripts": {
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "lint": "node --experimental-strip-types scripts/style.ts --check",
+    "format": "node --experimental-strip-types scripts/style.ts --write"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
