@@ -69,13 +69,23 @@ function putSchedule(db: DatabaseSync, cardId: number, schedule: Schedule | null
     schedule.state.fastStability, schedule.lastReviewAt, schedule.dueAt,
     schedule.reviewCount, FSRS_VERSION, TARGET_RETENTION);
 }
-export function reviewCard(db: DatabaseSync, cardId: number, rating: Rating, now = new Date()): Schedule {
+export interface ReviewHooks {
+  /** Called inside the review transaction to validate a session's queued snapshot. */
+  before?: (before: Schedule | null) => void;
+  /** Called inside the same transaction as the FSRS state and event insert. */
+  after?: (after: Schedule, reviewEventId: number) => void;
+}
+
+export function reviewCard(
+  db: DatabaseSync, cardId: number, rating: Rating, now = new Date(), hooks?: ReviewHooks
+): Schedule {
   if (![1, 2, 3, 4].includes(rating)) throw new ReviewError('Rating must be Again, Hard, Good or Easy.');
   const timestamp = checkedTime(now);
   db.exec('BEGIN IMMEDIATE');
   try {
     getCard(db, cardId);
     const before = readSchedule(db, cardId);
+    hooks?.before?.(before);
     const elapsed = before ? (now.getTime() - Date.parse(before.lastReviewAt)) / DAY_MS : 0;
     if (!Number.isFinite(elapsed) || elapsed < 0) throw new ReviewError('Review time precedes previous review.');
     const recall = before ? retrievability(before.state, elapsed) : null;
@@ -84,12 +94,13 @@ export function reviewCard(db: DatabaseSync, cardId: number, rating: Rating, now
     const dueAt = new Date(now.getTime() + Math.max(1000, Math.round(days * DAY_MS))).toISOString();
     const after: Schedule = { state, lastReviewAt: timestamp, dueAt, reviewCount: (before?.reviewCount ?? 0) + 1 };
     putSchedule(db, cardId, after);
-    db.prepare(`
+    const inserted = db.prepare(`
       INSERT INTO review_events
       (card_id, event_type, rating, occurred_at, before_json, after_json, elapsed_days, retrievability_before, scheduler_version)
       VALUES (?, 'review', ?, ?, ?, ?, ?, ?, ?)
     `).run(cardId, rating, timestamp, before ? JSON.stringify(before) : null,
       JSON.stringify(after), elapsed, recall, FSRS_VERSION);
+    hooks?.after?.(after, Number(inserted.lastInsertRowid));
     db.exec('COMMIT');
     return after;
   } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -100,7 +111,14 @@ export function reviewHistory(db: DatabaseSync, cardId: number): ReviewEvent[] {
 }
 
 /** Reverse the latest active review by restoring its saved pre-review snapshot. */
-export function undoReview(db: DatabaseSync, cardId: number, now = new Date()): Schedule | null {
+export interface UndoHooks {
+  before?: (reviewEventId: number) => void;
+  after?: (reviewEventId: number) => void;
+}
+
+export function undoReview(
+  db: DatabaseSync, cardId: number, now = new Date(), hooks?: UndoHooks
+): Schedule | null {
   const timestamp = checkedTime(now);
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -112,6 +130,7 @@ export function undoReview(db: DatabaseSync, cardId: number, now = new Date()): 
       ORDER BY r.id DESC LIMIT 1
     `).get(cardId) as ReviewEvent | undefined;
     if (!latest) throw new ReviewError('No active review to undo.');
+    hooks?.before?.(latest.id);
     const current = readSchedule(db, cardId);
     if (!current || JSON.stringify(current) !== latest.after_json) {
       throw new ReviewError('Review history does not match current schedule.');
@@ -124,6 +143,7 @@ export function undoReview(db: DatabaseSync, cardId: number, now = new Date()): 
       VALUES (?, 'undo', NULL, ?, ?, ?, ?, ?)
     `).run(cardId, timestamp, JSON.stringify(current), before ? JSON.stringify(before) : null,
       latest.id, FSRS_VERSION);
+    hooks?.after?.(latest.id);
     db.exec('COMMIT');
     return before;
   } catch (error) { db.exec('ROLLBACK'); throw error; }
