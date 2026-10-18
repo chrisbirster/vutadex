@@ -24,11 +24,11 @@ DECKS
   deck delete <id> [--yes] Delete a deck
 
 CARDS
-  card list <deck>      List cards in a deck
-  card add <deck>       Add a flashcard
+  card list <deck-id>   List cards in a deck\n  card search <deck-id> <query> Search a deck
+  card add <deck-id> --front <text> --back <text>
   card show <id>        View a flashcard
-  card edit <id>        Edit a flashcard
-  card delete <id>      Delete a flashcard
+  card edit <id> --front/--back <text>
+  card delete <id> [--yes] Delete a flashcard
 
 STUDY
   study                 Review due cards
