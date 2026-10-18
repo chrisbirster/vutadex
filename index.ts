@@ -2,6 +2,8 @@ import process from 'node:process';
 import { help } from './commands/help.ts';
 import { runDeckCommand } from './commands/deck.ts';
 import { runCardCommand } from './commands/card.ts';
+import { runNoteCommand } from './commands/note.ts';
+import { runMediaCommand } from './commands/media.ts';
 import { runDueCommand } from './commands/due.ts';
 import { runStudyCommand } from './commands/study.ts';
 
@@ -19,10 +21,14 @@ export async function main(args: string[]): Promise<number> {
     case 'version':
     case '-v':
     case '--version':
-      console.log('Vutadex v0.4.0');
+      console.log('Vutadex v0.5.0');
       return 0;
     case 'card':
       return runCardCommand(subcommand, rest);
+    case 'note':
+      return runNoteCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
+    case 'media':
+      return runMediaCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'due':
       return runDueCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'study':

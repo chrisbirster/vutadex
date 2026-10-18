@@ -1,39 +1,41 @@
 # Vutadex roadmap
 
-M0 released to main (#15); M1 released (#18); M2 released (#22); M3 released (#29).
-M4 interactive study sessions implemented in dev (#30, #31), final acceptance and release pending.
-Feature branches target dev; milestone release PRs merge dev into main after required CI.
+M0–M4 released to main (#15, #18, #22, #29, #33).
+M5 Plandalf-style note types implemented in dev (#35–#38), with acceptance and release pending.
+Branches: feature/* -> dev -> main using cross-platform CI and a regular milestone release merge.
 
 ## M0 — Foundation
-- [x] Node 26 TypeScript CLI, SQLite, modularization, strict type checks, tests and CI.
-- [x] Released to main (#15).
+- [x] Node 26 TypeScript local CLI, SQLite, TypeScript tests, CI and branch rules.
+- [x] Released (#15).
 
 ## M1 — Deck Management
-- [x] CRUD, descriptions, validation, confirmations and tests.
-- [x] Released to main (#18).
+- [x] CRUD, descriptions and input validation.
+- [x] Released (#18).
 
 ## M2 — Card Management
-- [x] CRUD, multiline content, search and tests.
-- [x] Released to main (#22).
+- [x] CRUD, multiline cards, search, tests.
+- [x] Released (#22).
 
 ## M3 — FSRS-7 Scheduling
-- [x] TypeScript engine, golden-vector parity, 34 parameters, SQLite v2 state/history and due scheduling.
-- [x] Released to main (#29).
+- [x] Pure TypeScript 34-parameter model, reference parity, SQLite scheduling/history/undo.
+- [x] Released (#29).
 
-## M4 — Interactive Studying
-- [x] Due/new/all deck-scoped queues; configurable new/review caps.
-- [x] Reveal before rating, single-key terminal shortcuts, skip/quit/undo.
-- [x] Durable queue persistence, resume/restart and SQLite v3 migration.
-- [x] Atomic FSRS rating and queue completion; protection from stale or duplicate review.
-- [x] TypeScript unit and cross-process CLI integration tests on Ubuntu/macOS/Windows.
-- [x] Feature PRs #30 and #31 merged into dev with green CI.
-- [ ] M4 acceptance/release PR merged to main.
+## M4 — Interactive Study
+- [x] Due/new/all queues, single-key reveal and explicit FSRS ratings, resume/limits/undo.
+- [x] Released (#33).
 
-## M5 — Study Methods
-Typed answers, multiple-choice, shuffle and cram without scheduling; document each method's review effects and add tests.
+## M5 — Plandalf Note Types and Card Generation
+- [x] SQLite v4 logical notes, fields and stable generated-card mapping.
+- [x] Basic, reverse, optional reverse, cloze, typed-answer, choice, select, ordering and image-occlusion.
+- [x] Typed/choice/select/ordering study prompts with explicit FSRS grades.
+- [x] Local media hash storage and terminal occlusion fallback.
+- [x] Note creation/editing/retirement; old card identities and FSRS history preserved.
+- [x] Legacy cards remain accessible, retired generated cards hidden from due/study queues.
+- [x] Unit and CLI tests for v3 migration, note identity, retirement and interactions.
+- [ ] Final acceptance CI and M5 release to main.
 
 ## M6 — Progress and Portability
-Statistics, due forecast, review history and streaks, safe import/export/backup and restore tests.
+Stats, forecasts, export/import including Plandalf .deck v2, durable media portability, safe backup/restore, round-trip tests.
 
-## M7 — Packaging and v1.0
-Installable CLI, OS verification, upgrade safety, complete docs, tagged releases, v1.0 regression.
+## M7 — Distribution
+Installable CLI, complete OS verification, release tagging, migration safety, v1.0 documentation.

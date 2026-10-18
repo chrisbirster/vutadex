@@ -87,6 +87,11 @@ export function sessionSummary(db: DatabaseSync, sessionId: number): StudySessio
 }
 
 function finishIfEmpty(db: DatabaseSync, sessionId: number, now: string): void {
+  db.prepare(`
+    UPDATE study_session_items SET status='skipped'
+    WHERE session_id=? AND status='pending' AND card_id IN
+      (SELECT card_id FROM generated_cards WHERE retired=1)
+  `).run(sessionId);
   const hasPending = db.prepare("SELECT 1 FROM study_session_items WHERE session_id = ? AND status = 'pending' LIMIT 1").get(sessionId);
   if (!hasPending) {
     db.prepare("UPDATE study_sessions SET status='completed', updated_at=? WHERE id=? AND status='active'")
@@ -131,7 +136,9 @@ export function openStudySession(
         COALESCE(s.review_count, 0) AS review_count,
         s.last_review_at
       FROM cards c LEFT JOIN card_schedules s ON s.card_id = c.id
-      WHERE (? IS NULL OR c.deck_id = ?)
+      LEFT JOIN generated_cards g ON g.card_id = c.id
+      WHERE (g.card_id IS NULL OR g.retired=0)
+        AND (? IS NULL OR c.deck_id = ?)
         AND (? = 'all' OR (? = 'new' AND s.card_id IS NULL)
              OR (? = 'due' AND (s.card_id IS NULL OR s.due_at <= ?)))
       ORDER BY CASE WHEN s.card_id IS NULL THEN 1 ELSE 0 END,
@@ -183,7 +190,8 @@ export function nextStudyItem(db: DatabaseSync, sessionId: number): StudyItem | 
   return db.prepare(`
     SELECT c.id AS cardId, c.deck_id AS deckId, c.front, c.back, i.kind, i.position
     FROM study_session_items i JOIN cards c ON c.id = i.card_id
-    WHERE i.session_id = ? AND i.status = 'pending'
+    LEFT JOIN generated_cards g ON g.card_id=c.id
+    WHERE i.session_id = ? AND i.status = 'pending' AND (g.card_id IS NULL OR g.retired=0)
     ORDER BY i.position LIMIT 1
   `).get(sessionId) as StudyItem | undefined ?? null;
 }
