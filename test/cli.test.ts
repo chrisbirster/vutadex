@@ -76,3 +76,33 @@ test('card CRUD and search persist across CLI invocations', () => {
     assert.equal(run(['card', 'show', '1'], home).status, 1);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test('FSRS-7 card reviews persist across process restarts and undo reverts them', () => {
+  const home = mkdtempSync(join(tmpdir(), 'vutadex-m3-'));
+  try {
+    assert.equal(run(['deck', 'create', 'Biology'], home).status, 0);
+    assert.equal(run(['card', 'add', '1', '--front', 'mitosis', '--back', 'division'], home).status, 0);
+    const before = run(['due', '1'], home);
+    assert.equal(before.status, 0, before.stderr);
+    assert.match(before.stdout, /mitosis/);
+    const reviewed = run(['card', 'review', '1', 'good'], home);
+    assert.equal(reviewed.status, 0, reviewed.stderr);
+    assert.match(reviewed.stdout, /Next due/);
+    const schedule = run(['card', 'schedule', '1'], home);
+    assert.equal(schedule.status, 0, schedule.stderr);
+    assert.match(schedule.stdout, /reviewCount|review_count/);
+    const history = run(['card', 'history', '1'], home);
+    assert.equal(history.status, 0, history.stderr);
+    assert.match(history.stdout, /Good/);
+    const undo = run(['card', 'undo', '1'], home);
+    assert.equal(undo.status, 0, undo.stderr);
+    const restored = run(['due', '1'], home);
+    assert.equal(restored.status, 0, restored.stderr);
+    assert.match(restored.stdout, /mitosis/);
+    const events = run(['card', 'history', '1'], home);
+    assert.match(events.stdout, /undo/);
+    assert.equal(run(['card', 'undo', '1'], home).status, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
