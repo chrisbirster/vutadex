@@ -1,11 +1,13 @@
 import process from 'node:process';
-import os from 'os';
-import path from 'path';
+import os from 'node:os';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 
 import { help } from './commands/help.ts';
 
+
+let database: DatabaseSync | undefined;
 
 const args = process.argv.slice(2);
 const [command, subcommand, ...rest] = args;
@@ -31,12 +33,21 @@ switch (command) {
         break;
       }
 
-      case 'create':
-        console.log('Creating deck:', rest.join(' '));
+      case 'create': {
+        const name = rest.join(' ').trim();
+        if (!name) {
+          console.error('Usage: vutadex deck create <name>');
+          process.exitCode = 1;
+          break;
+        }
+        const result = db.prepare('INSERT INTO decks (name) VALUES (?)').run(name);
+        console.log(`Created deck "${name}" (ID: ${result.lastInsertRowid})`);
         break;
+      }
 
       default:
-        console.log('Unknown deck command');
+        console.error('Unknown deck command. Try: deck list or deck create <name>');
+        process.exitCode = 1;
     }
 
     break;
@@ -92,8 +103,6 @@ export function getDataHome(): string {
 }
 
 
-let database: DatabaseSync | undefined;
-
 export function getDatabase(): DatabaseSync {
   if (database) {
     return database;
@@ -113,9 +122,9 @@ export function getDatabase(): DatabaseSync {
     'vdex.db'
   );
 
-  database = new DatabaseSync(databasePath);
-
-  database.exec(`
+  const db = new DatabaseSync(databasePath);
+  try {
+    db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
 
@@ -137,6 +146,10 @@ export function getDatabase(): DatabaseSync {
         ON DELETE CASCADE
     );
   `);
-
-  return database;
+    database = db;
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
