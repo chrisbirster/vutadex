@@ -8,7 +8,7 @@ Vutadex uses Node 26's TypeScript test runner and V8 coverage, targeted at **cle
 - `npm test` — all unit, integration and regression suites
 - `npm run test:coverage` — enforce 95% lines, 90% branches and 100% functions
 - `npm run build` — compile the CLI and copy versioned migrations and query SQL into `dist/`
-- `node --test test/packaged-cli.test.ts` — test the compiled CLI after building
+- `node --test test/packaged-cli.verify.ts` — test the compiled CLI after building
 - `npm run check` — typecheck, style and test suite
 
 Coverage includes production code from root entrypoints, `commands/` (including subcommands), `services/`, `database/`, `fsrs/`, and `utils/`. Test code is excluded; `--test-coverage-include-all` includes never-imported source modules.
