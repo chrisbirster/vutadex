@@ -24,4 +24,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run test:coverage
       - run: node index.ts help
