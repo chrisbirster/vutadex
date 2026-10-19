@@ -83,7 +83,7 @@ export function parseSelection(value: string, choices: readonly Choice[]): strin
   const raw = parseJson(value, 'Correct choices');
   if (!Array.isArray(raw) || !raw.length ||
       !raw.every((x: unknown) => typeof x === 'string'))
-    throw new NoteError('Correct choices must be a requireText JSON array of choice IDs.');
+    throw new NoteError('Correct choices must be a nonempty JSON array of choice IDs.');
   const ids = raw as string[];
   if (ids.length !== new Set(ids).size ||
       ids.some(id => !choices.some(c => c.id === id)))
