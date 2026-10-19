@@ -1,7 +1,7 @@
 # Vutadex roadmap
 
 M0–M4 released to main (#15, #18, #22, #29, #33).
-M5 Plandalf-style note types implemented in dev (#35–#38), with acceptance and release pending.
+M5 Plandalf-style note types released to main (#41). Cleanup v3 source-of-truth integration and test portability are being completed on dev.
 Branches: feature/* -> dev -> main using cross-platform CI and a regular milestone release merge.
 
 ## M0 — Foundation
@@ -32,7 +32,7 @@ Branches: feature/* -> dev -> main using cross-platform CI and a regular milesto
 - [x] Note creation/editing/retirement; old card identities and FSRS history preserved.
 - [x] Legacy cards remain accessible, retired generated cards hidden from due/study queues.
 - [x] Unit and CLI tests for v3 migration, note identity, retirement and interactions.
-- [ ] Final acceptance CI and M5 release to main.
+- [x] Final acceptance CI and M5 release to main (#41).
 
 ## M6 — Progress and Portability
 Stats, forecasts, export/import including Plandalf .deck v2, durable media portability, safe backup/restore, round-trip tests.

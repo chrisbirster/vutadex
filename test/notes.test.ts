@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../database/schema.ts';
+import { migrate } from '../database/migrate.ts';
 import { createDeck } from '../services/decks.ts';
-import { addCard } from '../services/cards.ts';
+import { createCard } from '../services/cards.ts';
 import { getSchedule,reviewCard,reviewHistory } from '../services/reviews.ts';
 import { createNote,updateNote,getNote,listNotes,generatedCards,retireNote } from '../services/notes.ts';
 import { generateCards,parseNoteType } from '../services/note-types.ts';
@@ -18,7 +18,7 @@ function setup(){
 test('v3 data migrates to v4 intact, repeatedly, with legacy cards',()=>{
   const {db,deckId}=setup();
   try{
-    const cardId=addCard(db,deckId,'Legacy','Answer').id;
+    const cardId=createCard(db,deckId,'Legacy','Answer').id;
     const reviewed=reviewCard(db,cardId,3,new Date('2026-01-01T00:00:00Z'));
     db.exec('DROP TABLE generated_cards; DROP TABLE notes; PRAGMA user_version=3');
     migrate(db);migrate(db);

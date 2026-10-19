@@ -6,8 +6,12 @@ on:
     branches: [dev, main]
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
+    timeout-minutes: 15
     name: Node 26 / ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -24,4 +28,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      - run: npm run test:coverage
+      - run: npm run build
+      - run: node --test test/packaged-cli.verify.ts
       - run: node index.ts help

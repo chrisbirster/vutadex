@@ -1,0 +1,1 @@
+SELECT id FROM decks WHERE name = ? COLLATE NOCASE

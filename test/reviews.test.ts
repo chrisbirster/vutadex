@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../database/schema.ts';
+import { migrate } from '../database/migrate.ts';
 import { createDeck } from '../services/decks.ts';
-import { addCard } from '../services/cards.ts';
+import { createCard } from '../services/cards.ts';
 import { reviewCard, undoReview, getSchedule, dueCards, reviewHistory } from '../services/reviews.ts';
 import { FSRS_VERSION } from '../fsrs/parameters.ts';
 
@@ -12,7 +12,7 @@ function setup(): { db: DatabaseSync; cardId: number } {
   db.exec('PRAGMA foreign_keys = ON');
   migrate(db);
   const deck = createDeck(db, 'Spanish');
-  const card = addCard(db, deck.id, 'hola', 'hello');
+  const card = createCard(db, deck.id, 'hola', 'hello');
   return { db, cardId: card.id };
 }
 
