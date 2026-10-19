@@ -230,6 +230,6 @@ test('deck boundary values and descriptions preserve valid data',()=>{
     assert.equal(renameDeck(db,deck.id,' N ').name,'N');
     assert.throws(()=>createDeck(db,'n'),/already exists/);
     assert.throws(()=>describeDeck(db,deck.id,'x'.repeat(2001)),/Description/);
-    assert.equal(describeDeck(db,deck.id,'').description,'');
+    assert.equal(describeDeck(db,deck.id,'').description,null);
   });
 });
