@@ -63,7 +63,8 @@ test('image occlusion CLI uses local media reference and refuses corrupted store
   const note=run(['note','add','1','image-occlusion',reference,masks,'']);
   ok(note);
   assert.match(run(['card','list','1']).stdout,/mask 1/);
-  const path=join(home,'data','vutadex','media',reference.slice('deez-media://sha256:'.length));
+  const dataHome=process.platform==='darwin' ? join(home,'Library','Application Support') : join(home,'data');
+  const path=join(dataHome,'vutadex','media',reference.slice('deez-media://sha256:'.length));
   assert.ok(readFileSync(path).length>0);
   ok(run(['media','inspect',reference]));
   writeFileSync(path,'corrupted-media');
