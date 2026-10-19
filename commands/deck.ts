@@ -6,9 +6,6 @@ import cmds from './deck/index.ts';
 export async function runDeckCommand(subcommand: string | undefined, args: string[]): Promise<number> {
   if (!subcommand) return showUsageInformation();
   try {
-    if (subcommand === 'delete') {
-      cmds.runDeckSubcommandDelete(db, args);
-    }
     const db = getDatabase();
     try {
       switch (subcommand) {
