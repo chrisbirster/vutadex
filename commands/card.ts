@@ -1,5 +1,5 @@
-import { createInterface } from 'node:readline/promises';
-import process from 'node:process';
+import { createTerminalInteraction } from './terminal.ts';
+import type { TerminalInteraction } from './terminal.ts';
 import { getDatabase } from '../database/index.ts';
 import { getDeck, DeckError } from '../services/decks.ts';
 import { CardError, parsePositiveId, addCard, editCard, getCard, listCards, deleteCard } from '../services/cards.ts';
@@ -20,21 +20,7 @@ function fields(args: string[]): { front?: string; back?: string } | null {
   }
   return result;
 }
-async function interactiveFields(existing?: { front: string; back: string }): Promise<{ front: string; back: string }> {
-  if (!process.stdin.isTTY) throw new CardError('Interactive entry requires a terminal; pass --front and --back.');
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const front = await rl.question('Front (use \\n for newlines): ');
-    const back = await rl.question('Back (use \\n for newlines): ');
-    return {
-      front: (front || existing?.front || '').replace(/\\n/g, '\n'),
-      back: (back || existing?.back || '').replace(/\\n/g, '\n')
-    };
-  } finally {
-    rl.close();
-  }
-}
-export async function runCardCommand(subcommand: string | undefined, args: string[]): Promise<number> {
+export async function runCardCommand(subcommand: string | undefined, args: string[], terminal: TerminalInteraction = createTerminalInteraction()): Promise<number> {
   if (!subcommand) return usage();
   try {
     if (subcommand === 'add' || subcommand === 'edit') {
@@ -45,7 +31,8 @@ export async function runCardCommand(subcommand: string | undefined, args: strin
       let values = opts;
       if (opts.front === undefined && opts.back === undefined) {
         if (subcommand === 'add') {
-          values = await interactiveFields();
+          if (!terminal.isTTY) throw new CardError('Interactive entry requires a terminal; pass --front and --back.');
+          values = await terminal.cardFields();
         } else {
           const existingDb = getDatabase();
           let existing: { front: string; back: string };
@@ -54,7 +41,8 @@ export async function runCardCommand(subcommand: string | undefined, args: strin
           } finally {
             existingDb.close();
           }
-          values = await interactiveFields(existing);
+          if (!terminal.isTTY) throw new CardError('Interactive entry requires a terminal; pass --front and --back.');
+          values = await terminal.cardFields(existing);
         }
       }
       const db = getDatabase();
@@ -78,12 +66,9 @@ export async function runCardCommand(subcommand: string | undefined, args: strin
       try {
         const card = getCard(db, id);
         if (args[1] !== '--yes') {
-          if (!process.stdin.isTTY) throw new CardError('Deletion requires terminal confirmation or --yes.');
-          const rl = createInterface({ input: process.stdin, output: process.stdout });
-          let answer: string;
-          try { answer = await rl.question(`Delete card ${card.id}? [y/N] `); }
-          finally { rl.close(); }
-          if (!/^(yes|y)$/i.test(answer.trim())) {
+          if (!terminal.isTTY) throw new CardError('Deletion requires terminal confirmation or --yes.');
+          const confirmed = await terminal.confirm(`Delete card ${card.id}? [y/N] `);
+          if (!confirmed) {
             console.log('Deletion cancelled.');
             return 0;
           }

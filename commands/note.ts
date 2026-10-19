@@ -1,5 +1,5 @@
-import { createInterface } from 'node:readline/promises';
-import process from 'node:process';
+import { createTerminalInteraction } from './terminal.ts';
+import type { TerminalInteraction } from './terminal.ts';
 import { getDatabase } from '../database/index.ts';
 import { parsePositiveId, CardError } from '../services/cards.ts';
 import { DeckError } from '../services/decks.ts';
@@ -10,7 +10,7 @@ function usage():number{
  console.error('Usage: note types | note add <deck-id> <type> <fields...> | note list <deck-id> | note show <note-id> | note edit <note-id> <fields...> | note delete <note-id> [--yes]');
  return 1;
 }
-export async function runNoteCommand(args:string[]):Promise<number>{
+export async function runNoteCommand(args:string[],terminal:TerminalInteraction=createTerminalInteraction()):Promise<number>{
  const [sub,...rest]=args;
  if(!sub)return usage();
  try {
@@ -57,12 +57,9 @@ export async function runNoteCommand(args:string[]):Promise<number>{
      const id=parsePositiveId(rest[0]);
      const note=getNote(db,id);
      if(rest[1]!=='--yes'){
-       if(!process.stdin.isTTY)throw new NoteError('Deletion requires confirmation in a terminal or --yes.');
-       const rl=createInterface({input:process.stdin,output:process.stdout});
-       let answer:string;
-       try{answer=await rl.question('Retire '+note.type+' note '+id+' and its generated cards? [y/N] ');}
-       finally{rl.close();}
-       if(!/^(y|yes)$/i.test(answer.trim())){console.log('Deletion cancelled.');return 0;}
+       if(!terminal.isTTY)throw new NoteError('Deletion requires confirmation in a terminal or --yes.');
+       const confirmed=await terminal.confirm('Retire '+note.type+' note '+id+' and its generated cards? [y/N] ');
+       if(!confirmed){console.log('Deletion cancelled.');return 0;}
      }
      retireNote(db,id);
      console.log('Retired note '+id+'; existing FSRS history preserved.');

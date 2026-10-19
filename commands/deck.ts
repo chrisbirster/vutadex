@@ -1,5 +1,5 @@
-import { createInterface } from 'node:readline/promises';
-import process from 'node:process';
+import { createTerminalInteraction } from './terminal.ts';
+import type { TerminalInteraction } from './terminal.ts';
 import { getDatabase } from '../database/index.ts';
 import { DeckError, createDeck, deleteDeck, describeDeck, getDeck, listDecks, renameDeck } from '../services/decks.ts';
 
@@ -15,7 +15,7 @@ function usage(): number {
   return 1;
 }
 
-export async function runDeckCommand(subcommand: string | undefined, args: string[]): Promise<number> {
+export async function runDeckCommand(subcommand: string | undefined, args: string[], terminal: TerminalInteraction = createTerminalInteraction()): Promise<number> {
   if (!subcommand) return usage();
   try {
     if (subcommand === 'delete') {
@@ -25,18 +25,12 @@ export async function runDeckCommand(subcommand: string | undefined, args: strin
       try {
         const deck = getDeck(db, id);
         if (!args.includes('--yes')) {
-          if (!process.stdin.isTTY) {
+          if (!terminal.isTTY) {
             console.error('Deletion requires confirmation in a terminal or --yes.');
             return 1;
           }
-          const rl = createInterface({ input: process.stdin, output: process.stdout });
-          let answer: string;
-          try {
-            answer = await rl.question(`Delete deck "${deck.name}" and its cards? [y/N] `);
-          } finally {
-            rl.close();
-          }
-          if (!/^(y|yes)$/i.test(answer.trim())) {
+          const confirmed = await terminal.confirm(`Delete deck "${deck.name}" and its cards? [y/N] `);
+          if (!confirmed) {
             console.log('Deletion cancelled.');
             return 0;
           }
