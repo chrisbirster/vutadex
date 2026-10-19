@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ import { reviewCard } from '../services/reviews.ts';
 import { openStudySession } from '../services/study.ts';
 
 const entry=fileURLToPath(new URL('../index.ts',import.meta.url));
-function withFileDb(fn:(db:DatabaseSync,run:(args:string[],input?:string)=>ReturnType<typeof spawnSync>)=>void):void{
+function withFileDb(fn:(db:DatabaseSync,run:(args:string[],input?:string)=>SpawnSyncReturns<string>)=>void):void{
   const home=mkdtempSync(join(tmpdir(),'vutadex-legacy-regression-'));
   const dir=join(home,'data','vutadex');
   mkdirSync(dir,{recursive:true});
