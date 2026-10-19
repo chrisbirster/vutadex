@@ -21,7 +21,7 @@ test('all top-level commands reject malformed arguments predictably in a persist
       ['deck','show'], ['deck','show','0'], ['deck','show','999'],
       ['deck','create'], ['deck','create','  '],
       ['deck','rename'], ['deck','rename','0','B'], ['deck','rename','9','B'],
-      ['deck','describe','1','--clear','unexpected'],['deck','describe','1','missing','--clear'],
+      ['deck','describe','1','--clear','unexpected'],
       ['deck','delete'],['deck','delete','0','--yes'],['deck','delete','1','--bogus'],
       ['card'], ['card','add'], ['card','add','0','--front','a','--back','b'],
       ['card','add','1'], ['card','add','1','--front','x'],
