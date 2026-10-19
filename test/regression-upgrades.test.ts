@@ -16,7 +16,8 @@ import { openStudySession } from '../services/study.ts';
 const entry=fileURLToPath(new URL('../index.ts',import.meta.url));
 function withFileDb(fn:(db:DatabaseSync,run:(args:string[],input?:string)=>SpawnSyncReturns<string>)=>void):void{
   const home=mkdtempSync(join(tmpdir(),'vutadex-legacy-regression-'));
-  const dir=join(home,'data','vutadex');
+  const dataHome=process.platform==='darwin' ? join(home,'Library','Application Support') : join(home,'data');
+  const dir=join(dataHome,'vutadex');
   mkdirSync(dir,{recursive:true});
   const file=join(dir,'vdex.db');
   const db=new DatabaseSync(file);
