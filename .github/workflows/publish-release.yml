@@ -1,0 +1,81 @@
+name: Publish versioned release
+
+# Publish only after the CI workflow for a push to the current main HEAD succeeds.
+# Running on workflow_run (rather than main push) avoids tagging unvalidated commits.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: milestone-release-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify released commit and package version
+        id: version
+        shell: bash
+        env:
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse HEAD)" != "$VERIFIED_SHA" ]]; then
+            echo "Superseded CI run: main has moved. No release created."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="$(node -p 'require("./package.json").version')"
+          lock_version="$(node -p 'require("./package-lock.json").version')"
+          if [[ "$version" != "$lock_version" ]]; then
+            echo "::error::package.json and package-lock.json versions differ."
+            exit 1
+          fi
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::Expected an exact semver version (major.minor.patch)."
+            exit 1
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub tag and release if absent
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG"; then
+            existing_sha="$(git rev-list -n 1 "$TAG")"
+            if ! git merge-base --is-ancestor "$existing_sha" "$VERIFIED_SHA"; then
+              echo "::error::Existing $TAG points outside the validated main history."
+              exit 1
+            fi
+            # Keep existing version tags immutable; attach a Release without moving the tag.
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --title "Vutadex $TAG" --generate-notes
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$VERIFIED_SHA" --title "Vutadex $TAG" --generate-notes
+          fi
