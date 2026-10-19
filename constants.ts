@@ -7,6 +7,7 @@ export const DB_NAME = 'vdex.db';
 // Text limits, in UTF-16 code units (what String#length counts)
 export const MAX_DECK_NAME_LENGTH = 120;
 export const MAX_DESCRIPTION_LENGTH = 2000;
+
 /** Card front/back, note fields and generated card text. */
 export const MAX_TEXT_LENGTH = 10000;
 
@@ -21,6 +22,7 @@ export const TARGET_RETENTION = 0.9;
 // Media
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MEDIA_REFERENCE_PREFIX = 'deez-media://sha256:';
+
 /** Matches a full media reference; capture group 1 is the lowercase hex SHA-256. */
 export const MEDIA_REFERENCE_PATTERN = /^deez-media:\/\/sha256:([0-9a-f]{64})$/;
 
