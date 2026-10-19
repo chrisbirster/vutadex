@@ -30,6 +30,8 @@ test('TTY study input handles reveal, typing, correction, Ctrl-C and cleanup',as
     const canceled=input.askText('Text: ');
     stream.emit('keypress','c',{name:'c',ctrl:true});
     assert.equal(await canceled,null);
+    stream.emit('keypress','s',{name:'s'});
+    assert.equal(await input.ask('Buffered: '),'s');
     const pending=input.ask('Close: ');
     input.close();
     assert.equal(await pending,null);
