@@ -10,21 +10,17 @@ export async function runDeckCommand(subcommand: string | undefined, args: strin
     try {
       switch (subcommand) {
         case 'delete':
-          cmds.runDeckSubcommandDelete(db, args);
+          return await cmds.runDeckSubcommandDelete(db, args);
         case 'list':
-          cmds.runDeckSubcommandList(db, args)
-        case 'create': {
-          cmds.runDeckSubcommandCreate(db, args);
-        }
-        case 'show': {
-          cmds.runDeckSubcommandShow(db, args);
-        }
-        case 'rename': {
-          cmds.runDeckSubcommandRename(db, args);
-        }
-        case 'describe': {
-          cmds.runDeckSubcommandDescribe(db, args)
-        }
+          return cmds.runDeckSubcommandList(db, args);
+        case 'create':
+          return cmds.runDeckSubcommandCreate(db, args);
+        case 'show':
+          return cmds.runDeckSubcommandShow(db, args);
+        case 'rename':
+          return cmds.runDeckSubcommandRename(db, args);
+        case 'describe':
+          return cmds.runDeckSubcommandDescribe(db, args);
         default:
           return showUsageInformation();
       }

@@ -3,30 +3,32 @@ import { getCard } from './cards.ts';
 import { FSRS_VERSION } from '../fsrs/parameters.ts';
 import { retrievability, nextMemoryState, nextIntervalDays } from '../fsrs/algorithm.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
-import { execute, loadQuery, queryAll, queryOne } from '../database/sql.ts';
+import { execute, loadQueryByFilename, queryAll, queryOne } from '../database/sql.ts';
 import { TARGET_RETENTION } from '../constants.ts';
 import type { DueCard, ReviewEvent, ReviewHooks, Schedule, UndoHooks } from '../models/review.ts';
 
-const GET_SCHEDULE_SQL = loadQuery('reviews/get-schedule.sql');
-const DELETE_SCHEDULE_SQL = loadQuery('reviews/delete-schedule.sql');
-const UPSERT_SCHEDULE_SQL = loadQuery('reviews/upsert-schedule.sql');
-const IS_RETIRED_SQL = loadQuery('reviews/is-retired.sql');
-const INSERT_REVIEW_EVENT_SQL = loadQuery('reviews/insert-review-event.sql');
-const REVIEW_HISTORY_SQL = loadQuery('reviews/history.sql');
-const LATEST_ACTIVE_REVIEW_SQL = loadQuery('reviews/latest-active.sql');
-const INSERT_UNDO_EVENT_SQL = loadQuery('reviews/insert-undo-event.sql');
-const DUE_CARDS_SQL = loadQuery('reviews/due.sql');
+const GET_SCHEDULE_SQL = loadQueryByFilename('reviews/get-schedule.sql');
+const DELETE_SCHEDULE_SQL = loadQueryByFilename('reviews/delete-schedule.sql');
+const UPSERT_SCHEDULE_SQL = loadQueryByFilename('reviews/upsert-schedule.sql');
+const IS_RETIRED_SQL = loadQueryByFilename('reviews/is-retired.sql');
+const INSERT_REVIEW_EVENT_SQL = loadQueryByFilename('reviews/insert-review-event.sql');
+const REVIEW_HISTORY_SQL = loadQueryByFilename('reviews/history.sql');
+const LATEST_ACTIVE_REVIEW_SQL = loadQueryByFilename('reviews/latest-active.sql');
+const INSERT_UNDO_EVENT_SQL = loadQueryByFilename('reviews/insert-undo-event.sql');
+const DUE_CARDS_SQL = loadQueryByFilename('reviews/due.sql');
 
 const DAY_MS = 86400000;
-export class ReviewError extends Error {}
+export class ReviewError extends Error { }
 
 function checkedTime(now: Date): string {
   if (!Number.isFinite(now.getTime())) throw new ReviewError('Invalid review date.');
   return now.toISOString();
 }
 function readSchedule(db: DatabaseSync, cardId: number): Schedule | null {
-  const row = queryOne<{ stability: number; difficulty: number; fast_stability: number;
-    last_review_at: string; due_at: string; review_count: number; scheduler_version: string }>(
+  const row = queryOne<{
+    stability: number; difficulty: number; fast_stability: number;
+    last_review_at: string; due_at: string; review_count: number; scheduler_version: string
+  }>(
     db, GET_SCHEDULE_SQL, cardId);
   if (!row) return null;
   if (row.scheduler_version !== FSRS_VERSION) {
@@ -46,7 +48,7 @@ function putSchedule(db: DatabaseSync, cardId: number, schedule: Schedule | null
     execute(db, DELETE_SCHEDULE_SQL, cardId);
     return;
   }
-  execute(db, UPSERT_SCHEDULE_SQL, cardId,schedule.state.stability, schedule.state.difficulty,
+  execute(db, UPSERT_SCHEDULE_SQL, cardId, schedule.state.stability, schedule.state.difficulty,
     schedule.state.fastStability, schedule.lastReviewAt, schedule.dueAt,
     schedule.reviewCount, FSRS_VERSION, TARGET_RETENTION);
 }
@@ -70,7 +72,7 @@ export function reviewCard(
     const dueAt = new Date(now.getTime() + Math.max(1000, Math.round(days * DAY_MS))).toISOString();
     const after: Schedule = { state, lastReviewAt: timestamp, dueAt, reviewCount: (before?.reviewCount ?? 0) + 1 };
     putSchedule(db, cardId, after);
-    const inserted = execute(db, INSERT_REVIEW_EVENT_SQL, cardId, rating,timestamp, before ? JSON.stringify(before) : null,
+    const inserted = execute(db, INSERT_REVIEW_EVENT_SQL, cardId, rating, timestamp, before ? JSON.stringify(before) : null,
       JSON.stringify(after), elapsed, recall, FSRS_VERSION);
     hooks?.after?.(after, Number(inserted.lastInsertRowid));
     db.exec('COMMIT');
@@ -99,7 +101,7 @@ export function undoReview(
     }
     const before: Schedule | null = latest.before_json ? JSON.parse(latest.before_json) as Schedule : null;
     putSchedule(db, cardId, before);
-    execute(db, INSERT_UNDO_EVENT_SQL, cardId,timestamp, JSON.stringify(current), before ? JSON.stringify(before) : null,
+    execute(db, INSERT_UNDO_EVENT_SQL, cardId, timestamp, JSON.stringify(current), before ? JSON.stringify(before) : null,
       latest.id, FSRS_VERSION);
     hooks?.after?.(latest.id);
     db.exec('COMMIT');

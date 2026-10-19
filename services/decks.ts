@@ -1,15 +1,15 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { execute, loadQuery, queryAll, queryOne } from '../database/sql.ts';
+import { execute, loadQueryByFilename, queryAll, queryOne } from '../database/sql.ts';
 import { MAX_DECK_NAME_LENGTH, MAX_DESCRIPTION_LENGTH } from '../constants.ts';
 import type { Deck, DeckIdRow } from '../models/deck.ts';
 
-const GET_DECK_SQL = loadQuery('decks/get.sql');
-const LIST_DECKS_SQL = loadQuery('decks/list.sql');
-const FIND_DECK_BY_NAME_SQL = loadQuery('decks/find-by-name.sql');
-const CREATE_DECK_SQL = loadQuery('decks/create.sql');
-const RENAME_DECK_SQL = loadQuery('decks/rename.sql');
-const DESCRIBE_DECK_SQL = loadQuery('decks/describe.sql');
-const DELETE_DECK_SQL = loadQuery('decks/delete.sql');
+const GET_DECK_SQL = loadQueryByFilename('decks/get.sql');
+const LIST_DECKS_SQL = loadQueryByFilename('decks/list.sql');
+const FIND_DECK_BY_NAME_SQL = loadQueryByFilename('decks/find-by-name.sql');
+const CREATE_DECK_SQL = loadQueryByFilename('decks/create.sql');
+const RENAME_DECK_SQL = loadQueryByFilename('decks/rename.sql');
+const DESCRIBE_DECK_SQL = loadQueryByFilename('decks/describe.sql');
+const DELETE_DECK_SQL = loadQueryByFilename('decks/delete.sql');
 
 export class DeckError extends Error { }
 
@@ -43,6 +43,20 @@ export function validateDeckName(userInputName: string): string {
   return trimmedUserInputName;
 }
 
+/**
+ * Trims a deck description and checks its length.
+ *
+ * @returns The trimmed text, or `null` if the input was `null` or blank.
+ * @throws {DeckError} If the trimmed text is longer than MAX_DESCRIPTION_LENGTH.
+ */
+export function validateDeckDescription(userInputDescription: string | null): string | null {
+  const trimmedDescription = userInputDescription?.trim();
+  if (!trimmedDescription) return null;
+  if (trimmedDescription.length > MAX_DESCRIPTION_LENGTH) {
+    throw new DeckError(`Description must be at most ${MAX_DESCRIPTION_LENGTH} characters.`);
+  }
+  return trimmedDescription;
+}
 
 /**
  * Throws if another deck already uses this name (case-insensitive).
@@ -82,11 +96,9 @@ export function listDecks(db: DatabaseSync): Deck[] {
  */
 export function createDeck(db: DatabaseSync, userInputName: string, userInputDescription: string | null = null): Deck {
   const cleanedDeckName = validateDeckName(userInputName);
-  if (userInputDescription !== null && userInputDescription.length > MAX_DESCRIPTION_LENGTH) {
-    throw new DeckError(`Description must be at most ${MAX_DESCRIPTION_LENGTH} characters.`);
-  }
+  const cleanedDeckDescription = validateDeckDescription(userInputDescription);
   ensureDeckNameUnique(db, cleanedDeckName);
-  const newDeckResult = execute(db, CREATE_DECK_SQL, cleanedDeckName, userInputDescription);
+  const newDeckResult = execute(db, CREATE_DECK_SQL, cleanedDeckName, cleanedDeckDescription);
   return getDeck(db, Number(newDeckResult.lastInsertRowid));
 }
 
@@ -97,9 +109,9 @@ export function createDeck(db: DatabaseSync, userInputName: string, userInputDes
  * @throws {DeckError} If the name is invalid, belongs to another deck, or the deck does not exist.
  */
 export function renameDeck(db: DatabaseSync, userInputDeckId: number, deckNameWanted: string): Deck {
-  const clean = validateDeckName(deckNameWanted);
-  ensureDeckNameUnique(db, clean, userInputDeckId);
-  execute(db, RENAME_DECK_SQL, clean, userInputDeckId);
+  const cleanedDeckName = validateDeckName(deckNameWanted);
+  ensureDeckNameUnique(db, cleanedDeckName, userInputDeckId);
+  execute(db, RENAME_DECK_SQL, cleanedDeckName, userInputDeckId);
   return getDeck(db, userInputDeckId);
 }
 
@@ -109,13 +121,11 @@ export function renameDeck(db: DatabaseSync, userInputDeckId: number, deckNameWa
  * @param description - New text of at most MAX_DESCRIPTION_LENGTH characters, or `null` to clear it.
  * @throws {DeckError} If the description is too long or the deck does not exist.
  */
-export function describeDeck(db: DatabaseSync, id: number, description: string | null): Deck {
-  if (description !== null && description.length > MAX_DESCRIPTION_LENGTH) {
-    throw new DeckError(`Description must be at most ${MAX_DESCRIPTION_LENGTH} characters.`);
-  }
-  getDeck(db, id); // existence check; the UPDATE below would silently match nothing
-  execute(db, DESCRIBE_DECK_SQL, description, id);
-  return getDeck(db, id);
+export function describeDeck(db: DatabaseSync, deckId: number, description: string | null): Deck {
+  const cleanedDescription = validateDeckDescription(description);
+  getDeck(db, deckId); // existence check; the UPDATE below would silently match nothing
+  execute(db, DESCRIBE_DECK_SQL, cleanedDescription, deckId);
+  return getDeck(db, deckId);
 }
 
 /**
@@ -125,7 +135,7 @@ export function describeDeck(db: DatabaseSync, id: number, description: string |
  *
  * @throws {DeckError} If the deck does not exist.
  */
-export function deleteDeck(db: DatabaseSync, id: number): void {
-  getDeck(db, id); // existence check; the DELETE below would silently match nothing
-  execute(db, DELETE_DECK_SQL, id);
+export function deleteDeck(db: DatabaseSync, deckId: number): void {
+  getDeck(db, deckId); // existence check; the DELETE below would silently match nothing
+  execute(db, DELETE_DECK_SQL, deckId);
 }

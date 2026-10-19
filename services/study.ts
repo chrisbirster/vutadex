@@ -2,33 +2,33 @@ import type { DatabaseSync } from 'node:sqlite';
 import { getDeck } from './decks.ts';
 import { reviewCard, undoReview } from './reviews.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
-import { execute, loadQuery, queryAll, queryOne } from '../database/sql.ts';
+import { execute, loadQueryByFilename, queryAll, queryOne } from '../database/sql.ts';
 import { DEFAULT_NEW_LIMIT, DEFAULT_REVIEW_LIMIT, MAX_STUDY_LIMIT } from '../constants.ts';
 import type { Schedule } from '../models/review.ts';
 import type {
   SessionItemStatus, SessionStatus, StudyItem, StudyMode, StudyOptions, StudySession,
 } from '../models/study.ts';
 
-const ACTIVE_SESSION_SQL = loadQuery('study/active-session.sql');
-const GET_SESSION_SQL = loadQuery('study/get-session.sql');
-const SESSION_COUNTS_SQL = loadQuery('study/session-counts.sql');
-const SKIP_RETIRED_ITEMS_SQL = loadQuery('study/skip-retired-items.sql');
-const HAS_PENDING_ITEM_SQL = loadQuery('study/has-pending-item.sql');
-const COMPLETE_SESSION_SQL = loadQuery('study/complete-session.sql');
-const ABANDON_SESSION_SQL = loadQuery('study/abandon-session.sql');
-const CREATE_SESSION_SQL = loadQuery('study/create-session.sql');
-const CANDIDATES_SQL = loadQuery('study/candidates.sql');
-const INSERT_ITEM_SQL = loadQuery('study/insert-item.sql');
-const NEXT_ITEM_SQL = loadQuery('study/next-item.sql');
-const GET_ITEM_SQL = loadQuery('study/get-item.sql');
-const SKIP_ITEM_SQL = loadQuery('study/skip-item.sql');
-const TOUCH_SESSION_SQL = loadQuery('study/touch-session.sql');
-const COMPLETE_ITEM_SQL = loadQuery('study/complete-item.sql');
-const LAST_DONE_ITEM_SQL = loadQuery('study/last-done-item.sql');
-const REOPEN_ITEM_SQL = loadQuery('study/reopen-item.sql');
-const REOPEN_SESSION_SQL = loadQuery('study/reopen-session.sql');
+const ACTIVE_SESSION_SQL = loadQueryByFilename('study/active-session.sql');
+const GET_SESSION_SQL = loadQueryByFilename('study/get-session.sql');
+const SESSION_COUNTS_SQL = loadQueryByFilename('study/session-counts.sql');
+const SKIP_RETIRED_ITEMS_SQL = loadQueryByFilename('study/skip-retired-items.sql');
+const HAS_PENDING_ITEM_SQL = loadQueryByFilename('study/has-pending-item.sql');
+const COMPLETE_SESSION_SQL = loadQueryByFilename('study/complete-session.sql');
+const ABANDON_SESSION_SQL = loadQueryByFilename('study/abandon-session.sql');
+const CREATE_SESSION_SQL = loadQueryByFilename('study/create-session.sql');
+const CANDIDATES_SQL = loadQueryByFilename('study/candidates.sql');
+const INSERT_ITEM_SQL = loadQueryByFilename('study/insert-item.sql');
+const NEXT_ITEM_SQL = loadQueryByFilename('study/next-item.sql');
+const GET_ITEM_SQL = loadQueryByFilename('study/get-item.sql');
+const SKIP_ITEM_SQL = loadQueryByFilename('study/skip-item.sql');
+const TOUCH_SESSION_SQL = loadQueryByFilename('study/touch-session.sql');
+const COMPLETE_ITEM_SQL = loadQueryByFilename('study/complete-item.sql');
+const LAST_DONE_ITEM_SQL = loadQueryByFilename('study/last-done-item.sql');
+const REOPEN_ITEM_SQL = loadQueryByFilename('study/reopen-item.sql');
+const REOPEN_SESSION_SQL = loadQueryByFilename('study/reopen-session.sql');
 
-export class StudyError extends Error {}
+export class StudyError extends Error { }
 type SessionRow = {
   id: number; deck_id: number | null; mode: StudyMode;
   new_limit: number; review_limit: number;
@@ -70,9 +70,11 @@ export function sessionSummary(db: DatabaseSync, sessionId: number): StudySessio
   const row = getSessionRow(db, sessionId);
   const counts = queryOne<{ total: number; pending: number; done: number; skipped: number }>(
     db, SESSION_COUNTS_SQL, sessionId)!; // an aggregate query always returns one row
-  return { id: row.id, deckId: row.deck_id, mode: row.mode,
+  return {
+    id: row.id, deckId: row.deck_id, mode: row.mode,
     newLimit: row.new_limit, reviewLimit: row.review_limit,
-    status: row.status, ...counts };
+    status: row.status, ...counts
+  };
 }
 
 function finishIfEmpty(db: DatabaseSync, sessionId: number, now: string): void {
@@ -179,7 +181,7 @@ export function rateStudyCard(
     before: before => {
       const item = requirePending(db, sessionId, cardId);
       if ((before?.reviewCount ?? 0) !== item.starting_review_count ||
-          (before?.lastReviewAt ?? null) !== item.starting_last_review_at) {
+        (before?.lastReviewAt ?? null) !== item.starting_last_review_at) {
         throw new StudyError('Card was reviewed outside this session. Skip it or restart the session.');
       }
     },

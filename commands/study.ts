@@ -1,14 +1,16 @@
 import { getDatabase } from '../database/index.ts';
-import { parsePositiveId } from '../services/cards.ts';
+import { parseDeckId } from './deck/utils.ts';
 import { DeckError } from '../services/decks.ts';
 import { ReviewError } from '../services/reviews.ts';
-import { openStudySession, nextStudyItem, rateStudyCard, sessionSummary,
-  skipStudyCard, undoLastStudyReview, finishStudySession, StudyError } from '../services/study.ts';
+import {
+  openStudySession, nextStudyItem, rateStudyCard, sessionSummary,
+  skipStudyCard, undoLastStudyReview, finishStudySession, StudyError
+} from '../services/study.ts';
 import { MAX_STUDY_LIMIT } from '../constants.ts';
 import type { StudyOptions, StudySession } from '../models/study.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
 import { makeStudyInput } from './study-input.ts';
-import { interactionForCard,needsAnswerInput,evaluateAnswer,answerPrompt } from '../services/study-interactions.ts';
+import { interactionForCard, needsAnswerInput, evaluateAnswer, answerPrompt } from '../services/study-interactions.ts';
 
 function usage(): number {
   console.error('Usage: study [deck-id] [--new | --all] [--new-limit N] [--review-limit N] [--restart] | study --resume');
@@ -40,7 +42,7 @@ function parseArgs(args: string[]): Config | null {
       if (arg === '--new-limit') options.newLimit = n;
       else options.reviewLimit = n;
     } else if (!arg.startsWith('-') && options.deckId === undefined) {
-      options.deckId = parsePositiveId(arg);
+      options.deckId = parseDeckId(arg);
     } else return null;
   }
   return { options, behavior };
@@ -95,7 +97,7 @@ export async function runStudyCommand(args: string[]): Promise<number> {
         console.log('Front:\n' + item.front);
         let restartCard = false;
         let revealed = false;
-        const interaction = interactionForCard(db,item.cardId);
+        const interaction = interactionForCard(db, item.cardId);
         while (!restartCard) {
           if (!revealed && needsAnswerInput(interaction)) {
             const response = await input.askText(answerPrompt(interaction));
@@ -109,8 +111,8 @@ export async function runStudyCommand(args: string[]): Promise<number> {
               restartCard = true;
               continue;
             }
-            const result = evaluateAnswer(interaction,response);
-            console.log(result.correct?'Correct answer.':'Not quite.');
+            const result = evaluateAnswer(interaction, response);
+            console.log(result.correct ? 'Correct answer.' : 'Not quite.');
             console.log('Expected: ' + result.expected);
             console.log('Back:\n' + item.back);
             console.log('Choose your own FSRS rating; correctness does not automatically set Easy.');

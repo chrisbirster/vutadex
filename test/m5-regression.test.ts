@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from '../database/migrate.ts';
 import { createDeck,getDeck } from '../services/decks.ts';
-import { addCard,editCard,deleteCard,listCards } from '../services/cards.ts';
+import { createCard,editCard,deleteCard,listCards } from '../services/cards.ts';
 import { reviewCard,getSchedule,reviewHistory,dueCards } from '../services/reviews.ts';
 import { createNote,updateNote,generatedCards,retireNote } from '../services/notes.ts';
 import { openStudySession,nextStudyItem,finishStudySession } from '../services/study.ts';
@@ -36,7 +36,7 @@ test('pending study queue skips retired generated cards without fabricating revi
  try{
   db.exec('PRAGMA foreign_keys=ON');migrate(db);
   const deckId=createDeck(db,'Deck').id;
-  const legacy=addCard(db,deckId,'Unmanaged','Answer');
+  const legacy=createCard(db,deckId,'Unmanaged','Answer');
   const note=createNote(db,deckId,'basic',['Managed','Answer']);
   const session=openStudySession(db,{deckId,newLimit:2});
   assert.equal(session.total,2);

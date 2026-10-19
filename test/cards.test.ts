@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from '../database/migrate.ts';
 import { createDeck } from '../services/decks.ts';
-import { addCard, editCard, getCard, listCards, deleteCard, parsePositiveId } from '../services/cards.ts';
+import { createCard, editCard, getCard, listCards, deleteCard } from '../services/cards.ts';
+import { parseCardId } from '../commands/card/utils.ts';
 
 test('card CRUD, multiline, search, deck isolation and cascading delete', () => {
   const db = new DatabaseSync(':memory:');
@@ -12,8 +13,8 @@ test('card CRUD, multiline, search, deck isolation and cascading delete', () => 
     migrate(db);
     const a = createDeck(db, 'A');
     const b = createDeck(db, 'B');
-    const card = addCard(db, a.id, '  Line 1\nLine 2 ', ' Answer ');
-    addCard(db, b.id, 'Line 1', 'Elsewhere');
+    const card = createCard(db, a.id, '  Line 1\nLine 2 ', ' Answer ');
+    createCard(db, b.id, 'Line 1', 'Elsewhere');
     assert.equal(getCard(db, card.id).front, 'Line 1\nLine 2');
     assert.equal(listCards(db, a.id).length, 1);
     assert.equal(listCards(db, a.id, 'line 2').length, 1);
@@ -32,11 +33,11 @@ test('card inputs and missing references are rejected', () => {
   try {
     migrate(db);
     const deck = createDeck(db, 'A');
-    for (const id of ['0', '-1', '1x', '9007199254740992']) assert.throws(() => parsePositiveId(id), /positive integer/);
-    assert.throws(() => addCard(db, 99, 'a', 'b'), /not found/);
-    assert.throws(() => addCard(db, deck.id, '', 'b'), /Front/);
-    assert.throws(() => addCard(db, deck.id, 'a', '\0'), /Back/);
-    assert.throws(() => addCard(db, deck.id, 'x'.repeat(10001), 'b'), /Front/);
+    for (const id of ['0', '-1', '1x', '9007199254740992']) assert.throws(() => parseCardId(id), /positive integer/);
+    assert.throws(() => createCard(db, 99, 'a', 'b'), /not found/);
+    assert.throws(() => createCard(db, deck.id, '', 'b'), /Front/);
+    assert.throws(() => createCard(db, deck.id, 'a', '\0'), /Back/);
+    assert.throws(() => createCard(db, deck.id, 'x'.repeat(10001), 'b'), /Front/);
     assert.throws(() => listCards(db, deck.id, '  '), /query/);
     assert.throws(() => editCard(db, 99, 'x'), /not found/);
   } finally { db.close(); }

@@ -8,4 +8,3 @@ export function runDeckSubcommandRename(db: DatabaseSync, args: string[]): numbe
   console.log(`Renamed deck ${deck.id} to "${deck.name}".`);
   return 0;
 }
-

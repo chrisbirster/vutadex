@@ -7,5 +7,3 @@ export function runDeckSubcommandShow(db: DatabaseSync, args: string[]): number 
   console.table(getDeck(db, parseDeckId(args[0])));
   return 0;
 }
-
-
