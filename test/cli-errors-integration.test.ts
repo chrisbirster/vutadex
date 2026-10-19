@@ -39,7 +39,7 @@ test('all top-level commands reject malformed arguments predictably in a persist
       ['note','add','1','unknown','x','y'],
       ['media'], ['media','add'], ['media','inspect','invalid'],
       ['due','not-an-id'], ['due','1','extra'],
-      ['study','--new','--all'], ['study','--resume','extra'],
+      ['study','not-an-id'], ['study','--new','--all'], ['study','--resume','extra'],
       ['study','--new-limit','-1'], ['study','--new-limit','1001'],
       ['study','--new-limit','wat'], ['study','--new-limit','1','--new-limit','2'],
       ['study','--review-limit','1001'], ['study','--restart','--restart']
