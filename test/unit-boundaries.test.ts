@@ -14,7 +14,7 @@ import { parseNoteType, parseChoices, parseSelection, parseMasks, parseClozes, g
 import { interactionForCard, evaluateAnswer, needsAnswerInput, answerPrompt } from '../services/study-interactions.ts';
 import { reviewCard, undoReview, getSchedule, reviewHistory } from '../services/reviews.ts';
 import { openStudySession, rateStudyCard, skipStudyCard, undoLastStudyReview,
-  sessionSummary } from '../services/study.ts';
+  sessionSummary, finishStudySession } from '../services/study.ts';
 
 function withDatabase(fn: (db: DatabaseSync) => void): void {
   const db = new DatabaseSync(':memory:');
@@ -193,6 +193,7 @@ test('session validation, stale queue, skipping and undo without history', () =>
     assert.throws(() => openStudySession(db,{reviewLimit:1001}),/limits/);
     const session=openStudySession(db,{deckId:deck.id,newLimit:1});
     assert.throws(() => undoLastStudyReview(db,session.id),/no session review/);
+    assert.throws(() => finishStudySession(db,999),/not found/);
     reviewCard(db,card.id,3,new Date('2026-01-01T00:00:00Z'));
     assert.throws(() => rateStudyCard(db,session.id,card.id,3,new Date('2026-01-02T00:00:00Z')),/outside this session/);
     assert.equal(sessionSummary(db,session.id).pending,1);
