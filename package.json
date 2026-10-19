@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm test",
     "lint": "node --experimental-strip-types scripts/style.ts --check",
-    "format": "node --experimental-strip-types scripts/style.ts --write"
+    "format": "node --experimental-strip-types scripts/style.ts --write",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include-all --test-coverage-include=commands/*.ts --test-coverage-include=database/*.ts --test-coverage-include=fsrs/*.ts --test-coverage-include=services/*.ts --test-coverage-include=utils/*.ts --test-coverage-include=index.ts test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
