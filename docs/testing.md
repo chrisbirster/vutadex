@@ -1,37 +1,33 @@
 # Testing and coverage
 
-Vutadex uses the native Node 26 TypeScript test runner and V8 coverage.
+Vutadex uses Node 26's TypeScript test runner and V8 coverage, targeted at **cleanup-commands-v3** as the canonical implementation.
 
 ## Commands
 
-- `npm ci`
-- `npm test` — all unit, CLI integration and regression tests
-- `npm run test:coverage` — source-only coverage with never-loaded files included
-- `npm run check` — typecheck, lint and tests
+- `npm ci` — install dependencies
+- `npm test` — all unit, integration and regression suites
+- `npm run test:coverage` — enforce 95% lines, 90% branches and 100% functions
+- `npm run build` — compile the CLI and copy versioned migrations and query SQL into `dist/`
+- `node --test test/packaged-cli.test.ts` — test the compiled CLI after building
+- `npm run check` — typecheck, style and test suite
 
-The coverage command includes application modules in `commands/`, `database/`, `fsrs/`, `services/`, `utils/` and the CLI entry point. The test code itself is **not** counted toward production coverage. The `--test-coverage-include-all` switch keeps unimported source files from disappearing from the denominator.
+Coverage includes production code from root entrypoints, `commands/` (including subcommands), `services/`, `database/`, `fsrs/`, and `utils/`. Test code is excluded; `--test-coverage-include-all` includes never-imported source modules.
 
-## CI quality gate
+## Current quality gate
 
-The current measured minimum is **95% line coverage, 90% branch coverage, and 100% function coverage**, checked on Ubuntu, macOS and Windows. These are **coverage floors, not a claim of total 100% coverage**. The stated long-term goal is 100% for all three metrics without excluding production source paths. Do not raise thresholds before the new tests pass independently on all OS runners.
+All three OS CI jobs must pass **95% line, 90% branch and 100% function** minimum coverage. This is a threshold, not a statement that every executable line or branch has been exercised.
+
+On the canonical integration branch after porting the tests, the preliminary Ubuntu measurement was **98.99% lines, 92.17% branches, 100% functions**. Recheck on the latest head before publication.
 
 ## Suites
 
-- `test/unit-boundaries.test.ts`: FSRS invalid inputs, note schemas, media geometry, data invariants, transaction rollback and schema error paths.
-- `test/media-service.test.ts`: image formats, hashing, deduplication, size limits and corruption checks.
-- `test/study-input-keyboard.test.ts`: simulated keyboard streams and input cleanup.
-- `test/paths-platform.test.ts`: environment directory selection on three operating systems.
-- `test/integration-workflows.test.ts`: multi-command deck/card/note/study/media lifecycle, real SQLite storage and error handling.
-- `test/cli-errors-integration.test.ts`: invalid argument matrix across CLI commands.
-- `test/regression-upgrades.test.ts`: persisted v1/v2/v3 → v4 upgrades, future schema refusal, history and queue preservation.
-- Existing FSRS golden vectors, note generation, study and CLI acceptance suites remain.
+- Unit: FSRS golden/reference vectors, deck/card/note operations, selection/occlusion, scheduling, input and error boundaries, media integrity and path handling.
+- Integration: real multi-process CLI operations, persistent SQLite, note/card/study workflows, command argument matrix, packaged CLI.
+- Regression: schema versions 1–4 and safe upgrades, existing review history and card IDs, study queue resume, media corruption, and migration file enumeration/order.
+- Interactive: deterministic test injection through `commands/terminal.ts` *without* replacing Cleanup v3's per-subcommand structure. Raw study keyboard entry is separately tested.
 
-Integration and regression tests use temporary user homes and subprocesses. No network, real user profile or production DB is required.
+The test suite never relies on an existing user profile or production database.
 
-## Next remaining coverage work
+## Remaining coverage gaps
 
-- Fully simulated interactive line-oriented confirmations and card-entry flows without relying on a real terminal in CI.
-- Less common command handler and catch branches, including filesystem failures and deliberate fault injection.
-- Numerical corner cases and fault recovery branches still below 100% branch coverage.
-
-Do not use coverage-ignore pragmas merely to make an uncovered path disappear. Keep failing tests and coverage gaps visible until they are resolved.
+The goal is 100% line and branch coverage; currently rare exception, usage and fault-injection branches remain. Do not suppress uncovered paths or reduce baseline CI checks to inflate percentages.

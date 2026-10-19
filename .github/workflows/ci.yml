@@ -29,4 +29,6 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run test:coverage
+      - run: npm run build
+      - run: node --test test/packaged-cli.test.ts
       - run: node index.ts help
