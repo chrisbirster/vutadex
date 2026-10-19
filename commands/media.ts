@@ -1,26 +1,24 @@
-import { importImage,locateImage,MediaError } from '../services/media.ts';
+import { MediaError } from '../services/media.ts';
+import { showUsageInformation } from './media/utils.ts';
+import cmds from './media/index.ts';
 
-export function runMediaCommand(args:string[]):number {
- try{
-  const [sub,value]=args;
-  if(args.length!==2||!value||!['add','inspect'].includes(sub??'')){
-    console.error('Usage: media add <image-path> | media inspect <deez-media-reference>');
-    return 1;
+export function runMediaCommand(subcommand: string | undefined, args: string[]): number {
+  if (!subcommand) return showUsageInformation();
+  try {
+    switch (subcommand) {
+      case 'add':
+        return cmds.runMediaSubcommandAdd(args);
+      case 'inspect':
+        return cmds.runMediaSubcommandInspect(args);
+      default:
+        return showUsageInformation();
+    }
+  } catch (error) {
+    // Unlike the other commands, media also reports plain filesystem errors (e.g. a missing file) as messages.
+    if (error instanceof MediaError || error instanceof Error) {
+      console.error(error.message);
+      return 1;
+    }
+    throw error;
   }
-  if(sub==='add'){
-    const result=importImage(value);
-    console.log('Stored '+result.mime+' ('+result.bytes+' bytes)');
-    console.log(result.reference);
-  }else{
-    const result=locateImage(value);
-    console.log('Stored image: '+result.mime+' ('+result.bytes+' bytes)');
-    console.log(result.path);
-  }
-  return 0;
- }catch(error){
-  if(error instanceof MediaError||error instanceof Error){
-    console.error(error.message);return 1;
-  }
-  throw error;
- }
 }

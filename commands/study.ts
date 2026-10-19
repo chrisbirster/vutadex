@@ -1,74 +1,30 @@
 import { getDatabase } from '../database/index.ts';
-import { parseDeckId } from './deck/utils.ts';
 import { DeckError } from '../services/decks.ts';
 import { ReviewError } from '../services/reviews.ts';
 import {
   openStudySession, nextStudyItem, rateStudyCard, sessionSummary,
   skipStudyCard, undoLastStudyReview, finishStudySession, StudyError
 } from '../services/study.ts';
-import { MAX_STUDY_LIMIT } from '../constants.ts';
-import type { StudyOptions, StudySession } from '../models/study.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
-import { makeStudyInput } from './study-input.ts';
+import { makeStudyInput } from './study/input.ts';
+import { describeProgress, parseStudyArgs, showHelpInformation, showUsageInformation } from './study/utils.ts';
+import type { StudyConfig } from './study/utils.ts';
 import { interactionForCard, needsAnswerInput, evaluateAnswer, answerPrompt } from '../services/study-interactions.ts';
 
-function usage(): number {
-  console.error('Usage: study [deck-id] [--new | --all] [--new-limit N] [--review-limit N] [--restart] | study --resume');
-  return 1;
-}
-type Config = { options: StudyOptions; behavior: 'auto' | 'resume' | 'restart' };
-function parseArgs(args: string[]): Config | null {
-  if (args.length === 1 && args[0] === '--resume') return { options: {}, behavior: 'resume' };
-  const options: StudyOptions = {};
-  let behavior: 'auto' | 'restart' = 'auto';
-  const seen = new Set<string>();
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === '--resume') return null;
-    if (arg === '--restart' || arg === '--new' || arg === '--all') {
-      if (seen.has(arg)) return null;
-      seen.add(arg);
-      if (arg === '--restart') behavior = 'restart';
-      if (arg === '--new' || arg === '--all') {
-        if (options.mode) return null;
-        options.mode = arg === '--new' ? 'new' : 'all';
-      }
-    } else if (arg === '--new-limit' || arg === '--review-limit') {
-      const value = args[++i];
-      if (seen.has(arg) || value === undefined || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
-      seen.add(arg);
-      const n = Number(value);
-      if (!Number.isSafeInteger(n) || n > MAX_STUDY_LIMIT) return null;
-      if (arg === '--new-limit') options.newLimit = n;
-      else options.reviewLimit = n;
-    } else if (!arg.startsWith('-') && options.deckId === undefined) {
-      options.deckId = parseDeckId(arg);
-    } else return null;
-  }
-  return { options, behavior };
-}
-function progress(session: StudySession): string {
-  return session.done + ' reviewed, ' + session.skipped + ' skipped, ' +
-    session.pending + ' remaining of ' + session.total;
-}
-
 export async function runStudyCommand(args: string[]): Promise<number> {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: study [deck-id] [--new | --all] [--new-limit N] [--review-limit N] [--restart] | study --resume');
-    console.log('Space/Enter: reveal; 1 Again, 2 Hard, 3 Good, 4 Easy; s skip; u undo; q quit.');
-    return 0;
-  }
-  let parsed: Config | null;
-  try { parsed = parseArgs(args); }
-  catch (error) {
+  if (args.includes('--help') || args.includes('-h')) return showHelpInformation();
+  let parsed: StudyConfig | null;
+  try {
+    parsed = parseStudyArgs(args);
+  } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return 1;
   }
-  if (!parsed) return usage();
+  if (!parsed) return showUsageInformation();
   const db = getDatabase();
   try {
     const session = openStudySession(db, parsed.options, parsed.behavior);
-    console.log('Session #' + session.id + ' (' + session.mode + ') — ' + progress(session) + '.');
+    console.log('Session #' + session.id + ' (' + session.mode + ') — ' + describeProgress(session) + '.');
     if (session.total === 0) {
       console.log('No matching cards to study.');
       return 0;
@@ -79,7 +35,7 @@ export async function runStudyCommand(args: string[]): Promise<number> {
         const item = nextStudyItem(db, session.id);
         if (!item) {
           const finished = finishStudySession(db, session.id);
-          console.log('Session complete: ' + progress(finished) + '.');
+          console.log('Session complete: ' + describeProgress(finished) + '.');
           if (!finished.done) return 0;
           const action = await input.ask('Press u to undo the last rating, or Enter/q to finish: ');
           if (action !== 'u') return 0;
@@ -93,7 +49,7 @@ export async function runStudyCommand(args: string[]): Promise<number> {
           continue;
         }
         const current = sessionSummary(db, session.id);
-        console.log('\nCard #' + item.cardId + ' [' + item.kind + '] — ' + progress(current));
+        console.log('\nCard #' + item.cardId + ' [' + item.kind + '] — ' + describeProgress(current));
         console.log('Front:\n' + item.front);
         let restartCard = false;
         let revealed = false;
@@ -107,7 +63,7 @@ export async function runStudyCommand(args: string[]): Promise<number> {
             }
             if (response.trim() === '/skip') {
               const updated = skipStudyCard(db, session.id, item.cardId);
-              console.log('Skipped. ' + progress(updated) + '.');
+              console.log('Skipped. ' + describeProgress(updated) + '.');
               restartCard = true;
               continue;
             }
@@ -135,7 +91,7 @@ export async function runStudyCommand(args: string[]): Promise<number> {
             restartCard = true;
           } else if (action === 's') {
             const updated = skipStudyCard(db, session.id, item.cardId);
-            console.log('Skipped. ' + progress(updated) + '.');
+            console.log('Skipped. ' + describeProgress(updated) + '.');
             restartCard = true;
           } else if (!revealed && (action === '' || action === 'r')) {
             console.log('Back:\n' + item.back);

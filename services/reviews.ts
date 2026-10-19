@@ -18,12 +18,15 @@ const INSERT_UNDO_EVENT_SQL = loadQueryByFilename('reviews/insert-undo-event.sql
 const DUE_CARDS_SQL = loadQueryByFilename('reviews/due.sql');
 
 const DAY_MS = 86400000;
+
 export class ReviewError extends Error { }
 
-function checkedTime(now: Date): string {
+/** @throws {ReviewError} If `now` is not a valid date. */
+function toTimestamp(now: Date): string {
   if (!Number.isFinite(now.getTime())) throw new ReviewError('Invalid review date.');
   return now.toISOString();
 }
+/** Reads the stored schedule without checking the card exists. */
 function readSchedule(db: DatabaseSync, cardId: number): Schedule | null {
   const row = queryOne<{
     stability: number; difficulty: number; fast_stability: number;
@@ -39,10 +42,17 @@ function readSchedule(db: DatabaseSync, cardId: number): Schedule | null {
     lastReviewAt: row.last_review_at, dueAt: row.due_at, reviewCount: row.review_count
   };
 }
+/**
+ * Loads a card's FSRS schedule, or `null` if it has never been reviewed.
+ *
+ * @throws {CardError} If the card does not exist.
+ * @throws {ReviewError} If the saved schedule was written by another scheduler version.
+ */
 export function getSchedule(db: DatabaseSync, cardId: number): Schedule | null {
   getCard(db, cardId);
   return readSchedule(db, cardId);
 }
+/** Writes a card's schedule, or clears it when `schedule` is `null`. */
 function putSchedule(db: DatabaseSync, cardId: number, schedule: Schedule | null): void {
   if (!schedule) {
     execute(db, DELETE_SCHEDULE_SQL, cardId);
@@ -52,11 +62,19 @@ function putSchedule(db: DatabaseSync, cardId: number, schedule: Schedule | null
     schedule.state.fastStability, schedule.lastReviewAt, schedule.dueAt,
     schedule.reviewCount, FSRS_VERSION, TARGET_RETENTION);
 }
+/**
+ * Records a rating for a card, schedules its next review, and logs the event, all in one transaction.
+ *
+ * @param hooks - Run inside the transaction around the write; used by study sessions to stay consistent.
+ * @returns The card's new schedule.
+ * @throws {ReviewError} If the rating is invalid, the card is retired, or time runs backwards.
+ * @throws {CardError} If the card does not exist.
+ */
 export function reviewCard(
   db: DatabaseSync, cardId: number, rating: Rating, now = new Date(), hooks?: ReviewHooks
 ): Schedule {
   if (![1, 2, 3, 4].includes(rating)) throw new ReviewError('Rating must be Again, Hard, Good or Easy.');
-  const timestamp = checkedTime(now);
+  const timestamp = toTimestamp(now);
   db.exec('BEGIN IMMEDIATE');
   try {
     getCard(db, cardId);
@@ -77,18 +95,31 @@ export function reviewCard(
     hooks?.after?.(after, Number(inserted.lastInsertRowid));
     db.exec('COMMIT');
     return after;
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
+/**
+ * Lists a card's review and undo events, oldest first.
+ *
+ * @throws {CardError} If the card does not exist.
+ */
 export function reviewHistory(db: DatabaseSync, cardId: number): ReviewEvent[] {
   getCard(db, cardId);
   return queryAll<ReviewEvent>(db, REVIEW_HISTORY_SQL, cardId);
 }
 
-/** Reverse the latest active review by restoring its saved pre-review snapshot. */
+/**
+ * Reverses the latest active review by restoring its saved pre-review snapshot.
+ *
+ * @returns The restored schedule, or `null` if the card is new again.
+ * @throws {ReviewError} If there is nothing to undo or the history no longer matches the schedule.
+ */
 export function undoReview(
   db: DatabaseSync, cardId: number, now = new Date(), hooks?: UndoHooks
 ): Schedule | null {
-  const timestamp = checkedTime(now);
+  const timestamp = toTimestamp(now);
   db.exec('BEGIN IMMEDIATE');
   try {
     getCard(db, cardId);
@@ -106,9 +137,13 @@ export function undoReview(
     hooks?.after?.(latest.id);
     db.exec('COMMIT');
     return before;
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
+/** Lists cards due at `now`, optionally limited to one deck. */
 export function dueCards(db: DatabaseSync, deckId?: number, now = new Date()): DueCard[] {
-  const timestamp = checkedTime(now);
+  const timestamp = toTimestamp(now);
   return queryAll<DueCard>(db, DUE_CARDS_SQL, timestamp, deckId ?? null, deckId ?? null);
 }

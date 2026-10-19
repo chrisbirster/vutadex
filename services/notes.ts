@@ -22,96 +22,167 @@ type NoteRow = {
   id: number; deck_id: number; note_type: NoteType;
   fields_json: string; tags_json: string; retired: number
 };
-const decode = (row: NoteRow): Note => ({
-  id: row.id, deckId: row.deck_id, type: row.note_type,
-  fields: JSON.parse(row.fields_json) as string[],
-  tags: JSON.parse(row.tags_json) as string[], retired: row.retired !== 0
-});
-function getRow(db: DatabaseSync, id: number): NoteRow {
-  const row = queryOne<NoteRow>(db, GET_NOTE_SQL, id);
-  if (!row) throw new NoteError('Note ' + id + ' not found.');
+
+function decodeNote(row: NoteRow): Note {
+  return {
+    id: row.id,
+    deckId: row.deck_id,
+    type: row.note_type,
+    fields: JSON.parse(row.fields_json) as string[],
+    tags: JSON.parse(row.tags_json) as string[],
+    retired: row.retired !== 0
+  };
+}
+
+/** Loads a note row whether or not it is retired. */
+function getNoteRow(db: DatabaseSync, noteId: number): NoteRow {
+  const row = queryOne<NoteRow>(db, GET_NOTE_SQL, noteId);
+  if (!row) throw new NoteError(`Note ${noteId} not found.`);
   return row;
 }
-export function getNote(db: DatabaseSync, id: number): Note {
-  const note = decode(getRow(db, id));
-  if (note.retired) throw new NoteError('Note ' + id + ' is retired.');
+
+/**
+ * Loads one active note.
+ *
+ * @throws {NoteError} If the note does not exist or has been retired.
+ */
+export function getNote(db: DatabaseSync, noteId: number): Note {
+  const note = decodeNote(getNoteRow(db, noteId));
+  if (note.retired) throw new NoteError(`Note ${noteId} is retired.`);
   return note;
 }
+
+/**
+ * Lists the notes in a deck.
+ *
+ * @throws {DeckError} If the deck does not exist.
+ */
 export function listNotes(db: DatabaseSync, deckId: number): Note[] {
   getDeck(db, deckId);
-  return queryAll<NoteRow>(db, LIST_NOTES_SQL, deckId).map(decode);
+  return queryAll<NoteRow>(db, LIST_NOTES_SQL, deckId).map(decodeNote);
 }
+
+/**
+ * Lists every card a note has generated, including retired ones.
+ *
+ * @throws {NoteError} If the note does not exist.
+ */
 export function generatedCards(db: DatabaseSync, noteId: number): GeneratedCard[] {
-  getRow(db, noteId);
+  getNoteRow(db, noteId);
   return queryAll<{ cardId: number; key: string; retired: number }>(db, GENERATED_CARDS_SQL, noteId)
     .map(row => ({ cardId: row.cardId, key: row.key, retired: row.retired !== 0 }));
 }
-function validateFields(type: NoteType, fields: readonly string[]): Draft[] {
+
+/**
+ * Checks that `fields` produce valid cards for this note type.
+ *
+ * @throws {NoteError} If the type is unknown or the fields are invalid.
+ */
+function validateNoteFields(type: NoteType, fields: readonly string[]): Draft[] {
   if (!NOTE_FIELDS[type]) throw new NoteError('Invalid note type.');
   // The caller generates again after the note has an allocated stable ID.
   return generateCards(1, type, fields);
 }
-function updateCards(db: DatabaseSync, noteId: number, deckId: number, drafts: readonly Draft[]): number[] {
+
+/**
+ * Brings a note's cards in line with freshly generated drafts, and returns the active card IDs.
+ *
+ * Drafts whose key already has a card update (and reactivate) that card, so its ID and review
+ * history survive; new keys create cards; keys no longer generated stay retired.
+ */
+function syncGeneratedCards(db: DatabaseSync, noteId: number, deckId: number, drafts: readonly Draft[]): number[] {
   const rows = queryAll<{ card_id: number; generation_key: string }>(db, GENERATED_CARD_KEYS_SQL, noteId);
-  const existing = new Map(rows.map(row => [row.generation_key, row.card_id]));
+  const existingCardIds = new Map(rows.map(row => [row.generation_key, row.card_id]));
   execute(db, RETIRE_GENERATED_CARDS_SQL, noteId);
-  const ids: number[] = [];
+  const cardIds: number[] = [];
   for (const draft of drafts) {
-    const old = existing.get(draft.key);
-    if (old !== undefined) {
-      execute(db, UPDATE_CARD_SQL, draft.front, draft.back, old);
-      execute(db, REACTIVATE_GENERATED_CARD_SQL, old);
-      ids.push(old);
+    const existingCardId = existingCardIds.get(draft.key);
+    if (existingCardId !== undefined) {
+      execute(db, UPDATE_CARD_SQL, draft.front, draft.back, existingCardId);
+      execute(db, REACTIVATE_GENERATED_CARD_SQL, existingCardId);
+      cardIds.push(existingCardId);
     } else {
-      const result = execute(db, CREATE_CARD_SQL, deckId, draft.front, draft.back);
-      const cardId = Number(result.lastInsertRowid);
-      execute(db, CREATE_GENERATED_CARD_SQL, cardId, noteId, draft.key);
-      ids.push(cardId);
+      const newCardResult = execute(db, CREATE_CARD_SQL, deckId, draft.front, draft.back);
+      const newCardId = Number(newCardResult.lastInsertRowid);
+      execute(db, CREATE_GENERATED_CARD_SQL, newCardId, noteId, draft.key);
+      cardIds.push(newCardId);
     }
   }
-  return ids;
+  return cardIds;
 }
+
+/**
+ * Creates a note and its generated cards in one transaction.
+ *
+ * @param fields - Field values in the order given by NOTE_FIELDS for `type`.
+ * @returns The stored note and the IDs of the cards it generated.
+ * @throws {NoteError} If the type, fields or tags are invalid.
+ * @throws {DeckError} If the deck does not exist.
+ */
 export function createNote(
   db: DatabaseSync, deckId: number, type: NoteType, fields: readonly string[], tags: string[] = []
 ): { note: Note; cardIds: number[] } {
   getDeck(db, deckId);
-  validateFields(type, fields);
-  if (!Array.isArray(tags) || tags.some(t => typeof t !== 'string' || t.length > 100))
+  validateNoteFields(type, fields);
+  if (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string' || tag.length > 100)) {
     throw new NoteError('Invalid note tags.');
+  }
   db.exec('BEGIN IMMEDIATE');
   try {
-    const result = execute(db, CREATE_NOTE_SQL, deckId, type, JSON.stringify(fields), JSON.stringify(tags));
-    const id = Number(result.lastInsertRowid);
-    const cards = updateCards(db, id, deckId, generateCards(id, type, fields));
+    const newNoteResult = execute(db, CREATE_NOTE_SQL, deckId, type, JSON.stringify(fields), JSON.stringify(tags));
+    const noteId = Number(newNoteResult.lastInsertRowid);
+    const cardIds = syncGeneratedCards(db, noteId, deckId, generateCards(noteId, type, fields));
     db.exec('COMMIT');
-    return { note: getNote(db, id), cardIds: cards };
-  } catch (err) { db.exec('ROLLBACK'); throw err; }
+    return { note: getNote(db, noteId), cardIds };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
+
+/**
+ * Replaces a note's fields and regenerates its cards without resetting their FSRS history.
+ *
+ * @throws {NoteError} If the note does not exist, is retired, or the fields are invalid.
+ */
 export function updateNote(
-  db: DatabaseSync, id: number, fields: readonly string[]
+  db: DatabaseSync, noteId: number, fields: readonly string[]
 ): { note: Note; cardIds: number[] } {
-  const current = getNote(db, id);
-  validateFields(current.type, fields);
+  const current = getNote(db, noteId);
+  validateNoteFields(current.type, fields);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const cardIds = updateCards(db, id, current.deckId, generateCards(id, current.type, fields));
-    execute(db, UPDATE_NOTE_SQL, JSON.stringify(fields), id);
+    const cardIds = syncGeneratedCards(db, noteId, current.deckId, generateCards(noteId, current.type, fields));
+    execute(db, UPDATE_NOTE_SQL, JSON.stringify(fields), noteId);
     db.exec('COMMIT');
-    return { note: getNote(db, id), cardIds };
-  } catch (err) { db.exec('ROLLBACK'); throw err; }
+    return { note: getNote(db, noteId), cardIds };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
-/** Soft retirement deliberately preserves generated card IDs and review history. */
-export function retireNote(db: DatabaseSync, id: number): void {
-  getNote(db, id);
+
+/**
+ * Retires a note and its generated cards. Soft retirement deliberately preserves
+ * generated card IDs and review history.
+ *
+ * @throws {NoteError} If the note does not exist or is already retired.
+ */
+export function retireNote(db: DatabaseSync, noteId: number): void {
+  getNote(db, noteId);
   db.exec('BEGIN IMMEDIATE');
   try {
-    execute(db, RETIRE_NOTE_SQL, id);
-    execute(db, RETIRE_GENERATED_CARDS_SQL, id);
+    execute(db, RETIRE_NOTE_SQL, noteId);
+    execute(db, RETIRE_GENERATED_CARDS_SQL, noteId);
     db.exec('COMMIT');
-  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
-export function noteForCard(db: DatabaseSync, cardId: number):
-  (Note & { generationKey: string }) | null {
+
+/** Finds the note a card was generated from, or `null` for a manually created card. */
+export function noteForCard(db: DatabaseSync, cardId: number): (Note & { generationKey: string }) | null {
   const row = queryOne<NoteRow & { generation_key: string }>(db, NOTE_FOR_CARD_SQL, cardId);
-  return row ? { ...decode(row), generationKey: row.generation_key } : null;
+  return row ? { ...decodeNote(row), generationKey: row.generation_key } : null;
 }

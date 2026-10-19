@@ -29,6 +29,7 @@ const REOPEN_ITEM_SQL = loadQueryByFilename('study/reopen-item.sql');
 const REOPEN_SESSION_SQL = loadQueryByFilename('study/reopen-session.sql');
 
 export class StudyError extends Error { }
+
 type SessionRow = {
   id: number; deck_id: number | null; mode: StudyMode;
   new_limit: number; review_limit: number;
@@ -44,11 +45,13 @@ type Candidate = {
   review_count: number; last_review_at: string | null;
 };
 
-const timestamp = (date: Date): string => {
+/** @throws {StudyError} If `date` is not a valid date. */
+function toTimestamp(date: Date): string {
   if (!Number.isFinite(date.getTime())) throw new StudyError('Invalid session date.');
   return date.toISOString();
-};
-function limits(options: StudyOptions): Required<Omit<StudyOptions, 'deckId'>> {
+}
+/** Fills in defaults and validates the mode and limits. @throws {StudyError} If either is invalid. */
+function resolveOptions(options: StudyOptions): Required<Omit<StudyOptions, 'deckId'>> {
   const mode = options.mode ?? 'due';
   const newLimit = options.newLimit ?? DEFAULT_NEW_LIMIT;
   const reviewLimit = options.reviewLimit ?? DEFAULT_REVIEW_LIMIT;
@@ -58,7 +61,8 @@ function limits(options: StudyOptions): Required<Omit<StudyOptions, 'deckId'>> {
   }
   return { mode, newLimit, reviewLimit };
 }
-function getActive(db: DatabaseSync): SessionRow | undefined {
+/** The unfinished session, if any. */
+function getActiveSession(db: DatabaseSync): SessionRow | undefined {
   return queryOne<SessionRow>(db, ACTIVE_SESSION_SQL);
 }
 function getSessionRow(db: DatabaseSync, sessionId: number): SessionRow {
@@ -66,6 +70,7 @@ function getSessionRow(db: DatabaseSync, sessionId: number): SessionRow {
   if (!session) throw new StudyError('Study session not found.');
   return session;
 }
+/** Loads a session with its card counts. @throws {StudyError} If it does not exist. */
 export function sessionSummary(db: DatabaseSync, sessionId: number): StudySession {
   const row = getSessionRow(db, sessionId);
   const counts = queryOne<{ total: number; pending: number; done: number; skipped: number }>(
@@ -77,6 +82,7 @@ export function sessionSummary(db: DatabaseSync, sessionId: number): StudySessio
   };
 }
 
+/** Skips retired cards, then completes the session if nothing is left to study. */
 function finishIfEmpty(db: DatabaseSync, sessionId: number, now: string): void {
   execute(db, SKIP_RETIRED_ITEMS_SQL, sessionId);
   const hasPending = queryOne(db, HAS_PENDING_ITEM_SQL, sessionId);
@@ -84,19 +90,27 @@ function finishIfEmpty(db: DatabaseSync, sessionId: number, now: string): void {
     execute(db, COMPLETE_SESSION_SQL, now, sessionId);
   }
 }
+/**
+ * Starts a study session, or picks up the unfinished one.
+ *
+ * @param behavior - `auto` resumes only a session with identical options, `resume` requires one,
+ *   `restart` abandons it and starts fresh.
+ * @throws {StudyError} If the options are invalid, an unfinished session has different options,
+ *   or `resume` finds none.
+ */
 export function openStudySession(
   db: DatabaseSync, options: StudyOptions = {},
   behavior: 'auto' | 'resume' | 'restart' = 'auto',
   now = new Date()
 ): StudySession {
-  const iso = timestamp(now);
-  const config = limits(options);
+  const iso = toTimestamp(now);
+  const config = resolveOptions(options);
   db.exec('BEGIN IMMEDIATE');
   try {
-    let active = getActive(db);
+    let active = getActiveSession(db);
     if (active) {
       finishIfEmpty(db, active.id, iso);
-      active = getActive(db);
+      active = getActiveSession(db);
     }
     if (active && behavior !== 'restart') {
       if (behavior === 'auto' && (
@@ -136,9 +150,9 @@ export function openStudySession(
     throw error;
   }
 }
-/** Finalize a queue whose last pending item was deleted outside the session. */
+/** Finalizes a queue whose last pending item was deleted outside the session. */
 export function finishStudySession(db: DatabaseSync, sessionId: number, now = new Date()): StudySession {
-  const iso = timestamp(now);
+  const iso = toTimestamp(now);
   db.exec('BEGIN IMMEDIATE');
   try {
     getSessionRow(db, sessionId);
@@ -151,18 +165,21 @@ export function finishStudySession(db: DatabaseSync, sessionId: number, now = ne
   }
 }
 
+/** The next pending card in the session, or `null` when none is left. */
 export function nextStudyItem(db: DatabaseSync, sessionId: number): StudyItem | null {
   getSessionRow(db, sessionId);
   return queryOne<StudyItem>(db, NEXT_ITEM_SQL, sessionId) ?? null;
 }
+/** @throws {StudyError} If the session is over or the card was already rated or skipped. */
 function requirePending(db: DatabaseSync, sessionId: number, cardId: number): ItemRow {
   if (getSessionRow(db, sessionId).status !== 'active') throw new StudyError('Study session is no longer active.');
   const item = queryOne<ItemRow>(db, GET_ITEM_SQL, sessionId, cardId);
   if (!item || item.status !== 'pending') throw new StudyError('Card already processed in this session.');
   return item;
 }
+/** Skips a pending card without scheduling it. */
 export function skipStudyCard(db: DatabaseSync, sessionId: number, cardId: number, now = new Date()): StudySession {
-  const iso = timestamp(now);
+  const iso = toTimestamp(now);
   db.exec('BEGIN IMMEDIATE');
   try {
     requirePending(db, sessionId, cardId);
@@ -171,12 +188,20 @@ export function skipStudyCard(db: DatabaseSync, sessionId: number, cardId: numbe
     finishIfEmpty(db, sessionId, iso);
     db.exec('COMMIT');
     return sessionSummary(db, sessionId);
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
+/**
+ * Rates a pending card, keeping the review and the session queue in step.
+ *
+ * @throws {StudyError} If the card was already processed or was reviewed outside this session.
+ */
 export function rateStudyCard(
   db: DatabaseSync, sessionId: number, cardId: number, rating: Rating, now = new Date()
 ): Schedule {
-  const iso = timestamp(now);
+  const iso = toTimestamp(now);
   return reviewCard(db, cardId, rating, now, {
     before: before => {
       const item = requirePending(db, sessionId, cardId);
@@ -192,8 +217,14 @@ export function rateStudyCard(
     }
   });
 }
+/**
+ * Undoes the session's most recent rating and puts the card back in the queue.
+ *
+ * @returns The ID of the reopened card.
+ * @throws {StudyError} If there is nothing to undo or the card changed outside the session.
+ */
 export function undoLastStudyReview(db: DatabaseSync, sessionId: number, now = new Date()): number {
-  const iso = timestamp(now);
+  const iso = toTimestamp(now);
   const row = queryOne<{ card_id: number; review_event_id: number }>(db, LAST_DONE_ITEM_SQL, sessionId);
   if (!row) throw new StudyError('There is no session review to undo.');
   // Both FSRS rollback and queue reopening are committed in one transaction.
