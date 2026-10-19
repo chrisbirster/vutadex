@@ -19,7 +19,7 @@ test('stats CLI renders global and deck snapshots; invalid input returns nonzero
     assert.equal(empty.status,0,empty.stderr);
     assert.match(empty.stdout,/Study statistics/);
     assert.match(empty.stdout,/Active cards/);
-    assert.match(empty.stdout,/2026|2027|2028/); // dates in a UTC forecast
+    assert.match(empty.stdout,/\d{4}-\d{2}-\d{2}/); // dates in a UTC forecast
     const created = run(['deck','create','Spanish']);
     assert.equal(created.status,0,created.stderr);
     assert.equal(run(['card','add','1','--front','Hello','--back','Hola']).status,0);
