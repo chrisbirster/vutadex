@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../database/schema.ts';
+import { migrate } from '../database/migrate.ts';
 import { createDeck, deleteDeck } from '../services/decks.ts';
-import { addCard } from '../services/cards.ts';
+import { createCard } from '../services/cards.ts';
 import { getSchedule, reviewCard, reviewHistory } from '../services/reviews.ts';
 import { openStudySession, nextStudyItem, rateStudyCard, skipStudyCard,
   sessionSummary, undoLastStudyReview, finishStudySession } from '../services/study.ts';
@@ -14,7 +14,7 @@ function setup(): { db: DatabaseSync; deckId: number; cards: number[] } {
   migrate(db);
   const deck = createDeck(db, 'Chemistry');
   const cards = ['a', 'b', 'c', 'd'].map(front =>
-    addCard(db, deck.id, front, 'answer').id);
+    createCard(db, deck.id, front, 'answer').id);
   return { db, deckId: deck.id, cards };
 }
 test('SQLite v3 migration is idempotent and preserves existing cards and schedules', () => {

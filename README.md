@@ -11,7 +11,6 @@ npm ci
 npm run typecheck
 npm run lint
 npm test
-npm run test:coverage
 node index.ts help
 node index.ts deck create "Spanish"
 node index.ts deck list
@@ -35,7 +34,7 @@ Tests use Node's built-in test runner, written in TypeScript. The database persi
 
 Run `npm run format` to normalize whitespace (LF, trailing whitespace, final newline). See [docs/quality-gates.md](docs/quality-gates.md) for enforcement details.
 
-See [testing and coverage](docs/testing.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/roadmap.md](docs/roadmap.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/roadmap.md](docs/roadmap.md).
 
 ## FSRS-7 scheduler
 

@@ -5,14 +5,25 @@
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "index.ts",
+  "bin": {
+    "vdex": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node --experimental-strip-types scripts/copy-sql.ts",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm test",
     "lint": "node --experimental-strip-types scripts/style.ts --check",
     "format": "node --experimental-strip-types scripts/style.ts --write",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=100 --test-coverage-include-all --test-coverage-include=commands/*.ts --test-coverage-include=database/*.ts --test-coverage-include=fsrs/*.ts --test-coverage-include=services/*.ts --test-coverage-include=utils/*.ts --test-coverage-include=index.ts test/*.test.ts"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=100 --test-coverage-include-all --test-coverage-include=commands/**/*.ts --test-coverage-include=database/*.ts --test-coverage-include=fsrs/*.ts --test-coverage-include=services/*.ts --test-coverage-include=utils/*.ts --test-coverage-include=index.ts --test-coverage-include=constants.ts test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

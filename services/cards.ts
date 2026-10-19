@@ -1,66 +1,112 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { getDeck } from './decks.ts';
+import { execute, loadQueryByFilename, queryAll, queryOne } from '../database/sql.ts';
+import { MAX_TEXT_LENGTH } from '../constants.ts';
+import type { Card } from '../models/card.ts';
 
-export interface Card {
-  id: number;
-  deck_id: number;
-  front: string;
-  back: string;
-  created_at: string;
-}
-export class CardError extends Error {}
+const GET_CARD_SQL = loadQueryByFilename('cards/get.sql');
+const LIST_CARDS_SQL = loadQueryByFilename('cards/list.sql');
+const IS_GENERATED_CARD_SQL = loadQueryByFilename('cards/is-generated.sql');
+const CREATE_CARD_SQL = loadQueryByFilename('cards/create.sql');
+const UPDATE_CARD_SQL = loadQueryByFilename('cards/update.sql');
+const DELETE_CARD_SQL = loadQueryByFilename('cards/delete.sql');
 
-export function parsePositiveId(value: string | undefined): number {
-  if (!value || !/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
-    throw new CardError('Expected a positive integer ID.');
+export class CardError extends Error { }
+
+/**
+ * Trims and validates one side of a card.
+ *
+ * @param userInputText - Raw text as typed by the user.
+ * @param label - Name of the side ("Front" or "Back"), used in the error message.
+ * @returns The trimmed text, safe to store.
+ * @throws {CardError} If the trimmed text is empty, longer than MAX_TEXT_LENGTH characters,
+ *   or contains a NUL character.
+ */
+export function validateCardText(userInputText: string, label: string): string {
+  const trimmedText = userInputText.trim();
+  if (!trimmedText || trimmedText.length > MAX_TEXT_LENGTH || trimmedText.includes('\0')) {
+    throw new CardError(`${label} must be 1–${MAX_TEXT_LENGTH} characters, excluding NUL.`);
   }
-  return Number(value);
+  return trimmedText;
 }
-function validateText(text: string, label: string): string {
-  const clean = text.trim();
-  if (!clean || clean.length > 10000 || clean.includes('\0')) {
-    throw new CardError(`${label} must be 1–10000 characters, excluding NUL.`);
-  }
-  return clean;
-}
-export function getCard(db: DatabaseSync, id: number): Card {
-  const row = db.prepare('SELECT id, deck_id, front, back, created_at FROM cards WHERE id = ?').get(id) as Card | undefined;
-  if (!row) throw new CardError(`Card ${id} not found.`);
-  return row;
-}
-export function listCards(db: DatabaseSync, deckId: number, query?: string): Card[] {
-  getDeck(db, deckId);
-  if (query !== undefined && !query.trim()) throw new CardError('Search query cannot be empty.');
-  const sql = `
-    SELECT c.id,c.deck_id,c.front,c.back,c.created_at FROM cards c
-    LEFT JOIN generated_cards g ON g.card_id=c.id
-    WHERE c.deck_id=? AND (g.card_id IS NULL OR g.retired=0)
-  `+(query===undefined?'':` AND (instr(lower(c.front), lower(?))>0 OR instr(lower(c.back), lower(?))>0)`)
-    +' ORDER BY c.id';
-  return db.prepare(sql).all(...(query===undefined?[deckId]:[deckId,query,query])) as unknown as Card[];
-}
-function ensureManualCard(db: DatabaseSync, id: number): void {
-  if (db.prepare('SELECT 1 FROM generated_cards WHERE card_id=?').get(id))
+
+/**
+ * Throws if the card was generated from a note. Those cards are owned by their
+ * note, so they can only change through it.
+ *
+ * @throws {CardError} If the card is generated.
+ */
+function ensureCardIsManual(db: DatabaseSync, cardId: number): void {
+  if (queryOne(db, IS_GENERATED_CARD_SQL, cardId)) {
     throw new CardError('Generated cards must be edited or retired through their source note.');
+  }
 }
-export function addCard(db: DatabaseSync, deckId: number, front: string, back: string): Card {
+
+/**
+ * Loads one card.
+ *
+ * @throws {CardError} If no card has this ID.
+ */
+export function getCard(db: DatabaseSync, cardId: number): Card {
+  const card = queryOne<Card>(db, GET_CARD_SQL, cardId);
+  if (!card) throw new CardError(`Card ${cardId} not found.`);
+  return card;
+}
+
+/**
+ * Lists the cards in a deck, optionally filtered by a search query.
+ *
+ * @param userInputQuery - Text to look for in either side of the card; omit to list every card.
+ * @throws {CardError} If the query is blank.
+ * @throws {DeckError} If the deck does not exist.
+ */
+export function listCards(db: DatabaseSync, deckId: number, userInputQuery?: string): Card[] {
   getDeck(db, deckId);
-  const a = validateText(front, 'Front');
-  const b = validateText(back, 'Back');
-  const result = db.prepare('INSERT INTO cards (deck_id, front, back) VALUES (?, ?, ?)').run(deckId, a, b);
-  return getCard(db, Number(result.lastInsertRowid));
+  if (userInputQuery !== undefined && !userInputQuery.trim()) throw new CardError('Search query cannot be empty.');
+  const query = userInputQuery ?? null;
+  return queryAll<Card>(db, LIST_CARDS_SQL, deckId, query, query, query);
 }
-export function editCard(db: DatabaseSync, id: number, front?: string, back?: string): Card {
-  const card = getCard(db, id);
-  ensureManualCard(db, id);
-  if (front === undefined && back === undefined) throw new CardError('Specify --front and/or --back.');
-  const a = front === undefined ? card.front : validateText(front, 'Front');
-  const b = back === undefined ? card.back : validateText(back, 'Back');
-  db.prepare('UPDATE cards SET front = ?, back = ? WHERE id = ?').run(a, b, id);
-  return getCard(db, id);
+
+/**
+ * Creates a card in a deck and returns it as stored.
+ *
+ * @param userInputFront - Raw front text; validated by {@link validateCardText}.
+ * @param userInputBack - Raw back text; validated by {@link validateCardText}.
+ * @throws {CardError} If either side is invalid.
+ * @throws {DeckError} If the deck does not exist.
+ */
+export function createCard(db: DatabaseSync, deckId: number, userInputFront: string, userInputBack: string): Card {
+  getDeck(db, deckId);
+  const cleanedFront = validateCardText(userInputFront, 'Front');
+  const cleanedBack = validateCardText(userInputBack, 'Back');
+  const newCardResult = execute(db, CREATE_CARD_SQL, deckId, cleanedFront, cleanedBack);
+  return getCard(db, Number(newCardResult.lastInsertRowid));
 }
-export function deleteCard(db: DatabaseSync, id: number): void {
-  getCard(db, id);
-  ensureManualCard(db, id);
-  db.prepare('DELETE FROM cards WHERE id = ?').run(id);
+
+/**
+ * Changes one or both sides of a manual card and returns it as stored.
+ * A side left `undefined` keeps its current text.
+ *
+ * @throws {CardError} If the card does not exist, is generated from a note,
+ *   no side was given, or a given side is invalid.
+ */
+export function editCard(db: DatabaseSync, cardId: number, userInputFront?: string, userInputBack?: string): Card {
+  const card = getCard(db, cardId);
+  ensureCardIsManual(db, cardId);
+  if (userInputFront === undefined && userInputBack === undefined) throw new CardError('Specify --front and/or --back.');
+  const cleanedFront = userInputFront === undefined ? card.front : validateCardText(userInputFront, 'Front');
+  const cleanedBack = userInputBack === undefined ? card.back : validateCardText(userInputBack, 'Back');
+  execute(db, UPDATE_CARD_SQL, cleanedFront, cleanedBack, cardId);
+  return getCard(db, cardId);
+}
+
+/**
+ * Deletes a manual card, along with its review history.
+ *
+ * @throws {CardError} If the card does not exist or is generated from a note.
+ */
+export function deleteCard(db: DatabaseSync, cardId: number): void {
+  getCard(db, cardId); // existence check; the DELETE below would silently match nothing
+  ensureCardIsManual(db, cardId);
+  execute(db, DELETE_CARD_SQL, cardId);
 }

@@ -7,9 +7,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { migrate } from '../database/schema.ts';
+import { migrate } from '../database/migrate.ts';
 import { createDeck } from '../services/decks.ts';
-import { addCard } from '../services/cards.ts';
+import { createCard } from '../services/cards.ts';
 import { reviewCard } from '../services/reviews.ts';
 import { openStudySession } from '../services/study.ts';
 
@@ -52,7 +52,7 @@ test('v1 user database upgrades in-place to v4 without deleting manual cards',()
 test('v2 FSRS reviews survive in-place upgrade and remain undoable',()=>withFileDb((db,run)=>{
   migrate(db);
   const deck=createDeck(db,'Preserve');
-  const card=addCard(db,deck.id,'Remember','me');
+  const card=createCard(db,deck.id,'Remember','me');
   reviewCard(db,card.id,3,new Date('2026-01-01T00:00:00Z'));
   db.exec('DROP TABLE generated_cards; DROP TABLE notes; DROP TABLE study_session_items; DROP TABLE study_sessions; PRAGMA user_version=2');
   const history=run(['card','history',String(card.id)]);
@@ -67,7 +67,7 @@ test('v2 FSRS reviews survive in-place upgrade and remain undoable',()=>withFile
 test('v3 active study queue persists across migration to v4',()=>withFileDb((db,run)=>{
   migrate(db);
   const deck=createDeck(db,'Resume');
-  addCard(db,deck.id,'Before','After');
+  createCard(db,deck.id,'Before','After');
   openStudySession(db,{deckId:deck.id,newLimit:1});
   db.exec('DROP TABLE generated_cards; DROP TABLE notes; PRAGMA user_version=3');
   const resumed=run(['study','--resume'],'q\n');

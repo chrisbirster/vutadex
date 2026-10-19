@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import process from 'node:process';
-import { makeStudyInput } from '../commands/study-input.ts';
+import { makeStudyInput } from '../commands/study/input.ts';
 
 test('TTY study input handles reveal, typing, correction, Ctrl-C and cleanup',async()=>{
   const stream=process.stdin;

@@ -14,8 +14,10 @@
   },
   "include": [
     "index.ts",
+    "constants.ts",
     "commands/**/*.ts",
     "database/**/*.ts",
+    "models/**/*.ts",
     "utils/**/*.ts",
     "test/**/*.ts"
   ],

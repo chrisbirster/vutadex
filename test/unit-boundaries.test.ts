@@ -5,9 +5,10 @@ import { initialMemoryState, nextIntervalDays, nextMemoryState, retrievability,
   fastRetrievability } from '../fsrs/algorithm.ts';
 import type { Rating } from '../fsrs/algorithm.ts';
 import { DEFAULT_PARAMETERS, validateParameters } from '../fsrs/parameters.ts';
-import { migrate } from '../database/schema.ts';
+import { migrate } from '../database/migrate.ts';
 import { createDeck, renameDeck, describeDeck } from '../services/decks.ts';
-import { addCard, parsePositiveId, getCard, editCard, deleteCard } from '../services/cards.ts';
+import { createCard, getCard, editCard, deleteCard } from '../services/cards.ts';
+import { parseCardId } from '../commands/card/utils.ts';
 import { createNote, getNote, updateNote, retireNote, generatedCards, noteForCard } from '../services/notes.ts';
 import { parseNoteType, parseChoices, parseSelection, parseMasks, parseClozes, generateCards,
   NoteError } from '../services/note-types.ts';
@@ -125,7 +126,7 @@ test('notes validate tags, unknown decks, retired note access and stable generat
     const value = createNote(db,deck.id,'basic',['Question','Answer'],['geo']);
     assert.deepEqual(getNote(db,value.note.id).tags,['geo']);
     assert.equal(noteForCard(db,value.cardIds[0]!)?.generationKey,'note:'+value.note.id+':template:0');
-    const manual = addCard(db,deck.id,'Q','A');
+    const manual = createCard(db,deck.id,'Q','A');
     assert.equal(noteForCard(db,manual.id),null);
     assert.throws(() => editCard(db,value.cardIds[0]!,'wrong'),/Generated/);
     assert.throws(() => deleteCard(db,value.cardIds[0]!),/Generated/);
@@ -170,10 +171,10 @@ test('study interaction parsers distinguish semantic correctness from FSRS ratin
 test('review and undo fail closed on corrupt or stale scheduler state', () => {
   withDatabase(db => {
     const deck=createDeck(db,'Review');
-    const card=addCard(db,deck.id,'What?','That.');
+    const card=createCard(db,deck.id,'What?','That.');
     assert.throws(() => getCard(db,1234),/not found/);
-    assert.throws(() => parsePositiveId('0'),/positive integer/);
-    assert.throws(() => addCard(db,deck.id,'a',''),/Back/);
+    assert.throws(() => parseCardId('0'),/positive integer/);
+    assert.throws(() => createCard(db,deck.id,'a',''),/Back/);
     const date=new Date('2026-01-01T00:00:00.000Z');
     reviewCard(db,card.id,3,date);
     db.prepare("UPDATE card_schedules SET scheduler_version='unexpected' WHERE card_id=?").run(card.id);
@@ -188,7 +189,7 @@ test('review and undo fail closed on corrupt or stale scheduler state', () => {
 test('session validation, stale queue, skipping and undo without history', () => {
   withDatabase(db=>{
     const deck=createDeck(db,'Sessions');
-    const card=addCard(db,deck.id,'New','answer');
+    const card=createCard(db,deck.id,'New','answer');
     assert.throws(() => openStudySession(db,{newLimit:-1}),/limits/);
     assert.throws(() => openStudySession(db,{reviewLimit:1001}),/limits/);
     const session=openStudySession(db,{deckId:deck.id,newLimit:1});
@@ -229,6 +230,6 @@ test('deck boundary values and descriptions preserve valid data',()=>{
     assert.equal(renameDeck(db,deck.id,' N ').name,'N');
     assert.throws(()=>createDeck(db,'n'),/already exists/);
     assert.throws(()=>describeDeck(db,deck.id,'x'.repeat(2001)),/Description/);
-    assert.equal(describeDeck(db,deck.id,'').description,'');
+    assert.equal(describeDeck(db,deck.id,'').description,null);
   });
 });
