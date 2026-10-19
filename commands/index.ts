@@ -6,6 +6,7 @@ import { runNoteCommand } from './note.ts';
 import { runMediaCommand } from './media.ts';
 import { runDueCommand } from './due.ts';
 import { runStudyCommand } from './study.ts';
+import { runStatsCommand } from './stats.ts';
 
 export default {
   handleHelpCommand,
@@ -16,4 +17,5 @@ export default {
   runMediaCommand,
   runDueCommand,
   runStudyCommand,
+  runStatsCommand,
 }

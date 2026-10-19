@@ -35,7 +35,10 @@ Branches: feature/* -> dev -> main using cross-platform CI and a regular milesto
 - [x] Final acceptance CI and M5 release to main (#41).
 
 ## M6 — Progress and Portability
-Stats, forecasts, export/import including Plandalf .deck v2, durable media portability, safe backup/restore, round-trip tests.
+- [ ] M6.1: Study statistics, review activity and UTC saved-due-date forecast (feature PR in progress; not released).
+- [ ] M6.2: .deck v2 export/import with verified format and round-trip tests.
+- [ ] M6.3: Portable media and validated safe backup/restore.
+- [ ] M6 release acceptance, CI and promotion to main as v0.6.0.
 
 ## M7 — Distribution
 Installable CLI, complete OS verification, release tagging, migration safety, v1.0 documentation.

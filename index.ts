@@ -27,8 +27,7 @@ export async function main(args: string[]): Promise<number> {
     case 'study':
       return commands.runStudyCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'stats':
-      console.error(`Command not implemented yet: ${command}`);
-      return 1;
+      return commands.runStatsCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     default:
       console.error(`Unknown command: ${command}\nRun "vutadex help" for usage.`);
       return 1;

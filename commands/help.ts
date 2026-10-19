@@ -62,8 +62,9 @@ STUDY
   study --help          Show interactive study shortcuts
 
 PROGRESS
-  stats                 Show learning statistics
-  stats <deck>          Show deck statistics
+  stats                 Show global study statistics and 7-day due forecast
+  stats <deck-id>       Show deck statistics and due forecast
+  stats [deck-id] --days N  Set forecast horizon (1–90 UTC days)
   due [deck-id]         Show due and new cards
 
 OPTIONS
