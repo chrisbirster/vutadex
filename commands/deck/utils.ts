@@ -4,7 +4,7 @@ import { DeckError } from '../../services/decks.ts';
 const USAGE = `Usage:
   deck list
   deck create <name> [--description <text>]
-  deck export <id> (prints Plandalf .deck v2 NDJSON)\n  deck show <id>
+  deck import <path.deck>\n  deck export <id> (prints Plandalf .deck v2 NDJSON)\n  deck show <id>
   deck rename <id> <name>
   deck describe <id> <text | --clear>
   deck delete <id> [--yes]`;
