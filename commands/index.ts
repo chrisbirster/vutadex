@@ -1,3 +1,4 @@
+import { runBackupCommand } from './backup.ts';
 import { handleHelpCommand } from './help.ts';
 import { handleVersionCommand } from './version.ts';
 import { runDeckCommand } from './deck.ts';
@@ -10,6 +11,7 @@ import { runStatsCommand } from './stats.ts';
 
 export default {
   handleHelpCommand,
+  runBackupCommand,
   handleVersionCommand,
   runDeckCommand,
   runCardCommand,
