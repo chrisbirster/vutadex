@@ -39,5 +39,4 @@ discrepancy and selecting the verified milestone merge SHAs.
 M3–M5 already have matching package versions. M6 must not be tagged as
 `v0.6.0` until its functionality is complete and approved on `main`.
 The initial post-M5 canonical Cleanup v3 promotion retains `0.5.0`:
-a code-structure cleanup is not an M6 release. A future v1.0.0 release
-requires its own explicit sign-off, after the M7 distribution milestone.
+a code-structure cleanup is not an M6 release. The v1.0.0 release candidate integrates M6 portability and M7 packaging/installation acceptance directly, rather than generating intermediate v0.6.0/v0.7.0 GitHub releases. Publication requires complete three-OS CI on the candidate PR and current main, plus a verified GitHub v1.0.0 tag and Release. Historical M6/M7 table entries describe the originally intended pre-1.0 version scheme, not releases that actually occurred.

@@ -20,6 +20,8 @@ export async function main(args: string[]): Promise<number> {
       return commands.runCardCommand(subcommand, rest);
     case 'note':
       return commands.runNoteCommand(subcommand, rest);
+    case 'backup':
+      return commands.runBackupCommand(subcommand, rest);
     case 'media':
       return commands.runMediaCommand(subcommand, rest);
     case 'due':
@@ -27,8 +29,7 @@ export async function main(args: string[]): Promise<number> {
     case 'study':
       return commands.runStudyCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'stats':
-      console.error(`Command not implemented yet: ${command}`);
-      return 1;
+      return commands.runStatsCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     default:
       console.error(`Unknown command: ${command}\nRun "vutadex help" for usage.`);
       return 1;

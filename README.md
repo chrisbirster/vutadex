@@ -72,4 +72,24 @@ node index.ts note list 1
 node index.ts media add ./diagram.png
 ```
 
-Other types: optional reverse, type-answer, multiple-choice, multiple-select, ordering and image-occlusion. Typed, choice, select and ordering interactions run inside `study` but **do not automatically choose an FSRS grade**. Existing manual cards remain supported; note edits regenerate cards under stable identities without discarding review history. See [M5 note types and media](docs/m5.md). `.deck` import/export and a graphical image viewer are not yet built.
+Other types: optional reverse, type-answer, multiple-choice, multiple-select, ordering and image-occlusion. Typed, choice, select and ordering interactions run inside `study` but **do not automatically choose an FSRS grade**. Existing manual cards remain supported; note edits regenerate cards under stable identities without discarding review history. See [M5 note types and media](docs/m5.md). Plandalf-compatible .deck v2 content-only export/import is available. Image-occlusion .deck transfer needs separate media handling; the local terminal does not render graphical masks.
+
+
+## Distribution and recovery (v1 release candidate)
+
+Use Node.js **26 or later**. From a checked-out repository:
+
+```sh
+npm ci
+npm run build
+npm pack --ignore-scripts
+npm install -g ./vutadex-1.0.0.tgz
+vdex version
+vdex help
+```
+
+These commands install a **local tarball**, not a published npm-registry package. GitHub releases are published only after successful `main` CI. This is a local application with no cloud deployment.
+
+Share content with `vdex deck export 1 > shared.deck` and `vdex deck import shared.deck`. The interchange is **content only**, excluding personal FSRS history, due dates and media binaries. Backup and recovery instead use `vdex backup create ./snapshot.json` and `vdex backup restore ./snapshot.json`. Restore intentionally refuses to overwrite any existing Vutadex data directory; recover on a fresh profile or after moving the old directory aside yourself. Keep backup files private because they include your study records and media without encryption.
+
+The v1 candidate is validated on Node 26 across Ubuntu, macOS and Windows. M6/M7 acceptance results and release status must be confirmed on the version bump PR and main before considering it released.

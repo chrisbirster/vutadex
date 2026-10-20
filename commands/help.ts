@@ -14,13 +14,14 @@ COMMANDS
   card                  Card commands
   note                  Logical notes and generated cards
   media                 Content-addressed local images
+  backup                Consistent database and media backups
   study                 Study commands
   progress              Progress commands
 
 DECKS
   deck list             List all decks
   deck create <name>    Create a deck
-  deck show <id>        View a deck
+  deck import <path.deck> Import a content-only .deck v2 file\n  deck export <id>      Export shareable .deck v2 to stdout\n  deck show <id>        View a deck
   deck rename <id> <name> Rename a deck
   deck describe <id> <text> Set description
   deck describe <id> --clear Clear description
@@ -33,6 +34,10 @@ NOTES
   note show <note-id>    Show fields and generated cards
   note edit <note-id> <fields...> Update note without resetting FSRS
   note delete <note-id> [--yes] Retire note and preserve history
+
+BACKUP
+  backup create <file>  Save SQLite plus verified media
+  backup restore <file> Restore only to an empty data directory
 
 MEDIA
   media add <image-path> Store local PNG/JPEG/WebP/GIF
@@ -62,8 +67,9 @@ STUDY
   study --help          Show interactive study shortcuts
 
 PROGRESS
-  stats                 Show learning statistics
-  stats <deck>          Show deck statistics
+  stats                 Show global study statistics and 7-day due forecast
+  stats <deck-id>       Show deck statistics and due forecast
+  stats [deck-id] --days N  Set forecast horizon (1–90 UTC days)
   due [deck-id]         Show due and new cards
 
 OPTIONS

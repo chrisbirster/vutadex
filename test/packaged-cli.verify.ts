@@ -23,7 +23,7 @@ test('compiled CLI retains all migrations and queries and runs without TypeScrip
   try {
     const version=run(['version']);
     assert.equal(version.status,0,version.stderr);
-    assert.match(version.stdout,/v0\.5\.0/);
+    assert.match(version.stdout,/v1\.0\.0/);
     const created=run(['deck','create','Compiled deck']);
     assert.equal(created.status,0,created.stderr);
     const noted=run(['note','add','1','basic','Compiled question','Compiled answer']);

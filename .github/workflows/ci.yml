@@ -30,5 +30,6 @@ jobs:
       - run: npm test
       - run: npm run test:coverage
       - run: npm run build
-      - run: node --test test/packaged-cli.verify.ts
+      - run: node --test test/packaged-cli.verify.ts test/package-manifest.verify.ts
+      - run: node --test test/package-install.verify.ts test/release-acceptance.verify.ts
       - run: node index.ts help

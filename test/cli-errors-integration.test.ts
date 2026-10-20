@@ -17,7 +17,7 @@ test('all top-level commands reject malformed arguments predictably in a persist
     const good=run(['deck','create','Safe']);
     assert.equal(good.status,0,good.stderr);
     const invalid:string[][]=[
-      ['not-a-command'], ['stats'], ['deck'], ['deck','list','extra'],
+      ['not-a-command'], ['stats','--days','0'], ['deck'], ['deck','list','extra'],
       ['deck','show'], ['deck','show','0'], ['deck','show','999'],
       ['deck','create'], ['deck','create','  '],
       ['deck','rename'], ['deck','rename','0','B'], ['deck','rename','9','B'],
