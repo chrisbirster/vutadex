@@ -20,6 +20,8 @@ export async function main(args: string[]): Promise<number> {
       return commands.runCardCommand(subcommand, rest);
     case 'note':
       return commands.runNoteCommand(subcommand, rest);
+    case 'backup':
+      return commands.runBackupCommand(subcommand, rest);
     case 'media':
       return commands.runMediaCommand(subcommand, rest);
     case 'due':
