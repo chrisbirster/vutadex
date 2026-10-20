@@ -20,7 +20,7 @@ COMMANDS
 DECKS
   deck list             List all decks
   deck create <name>    Create a deck
-  deck show <id>        View a deck
+  deck export <id>      Export shareable .deck v2 to stdout\n  deck show <id>        View a deck
   deck rename <id> <name> Rename a deck
   deck describe <id> <text> Set description
   deck describe <id> --clear Clear description
