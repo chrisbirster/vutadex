@@ -3,6 +3,7 @@ import { DeckError } from '../services/decks.ts';
 import { showUsageInformation } from './deck/utils.ts';
 import cmds from './deck/index.ts';
 import { runDeckSubcommandExport } from './deck/export.ts';
+import { runDeckSubcommandImport } from './deck/import.ts';
 
 export async function runDeckCommand(subcommand: string | undefined, args: string[]): Promise<number> {
   if (!subcommand) return showUsageInformation();
@@ -12,6 +13,8 @@ export async function runDeckCommand(subcommand: string | undefined, args: strin
       switch (subcommand) {
         case 'delete':
           return await cmds.runDeckSubcommandDelete(db, args);
+        case 'import':
+          return runDeckSubcommandImport(db, args);
         case 'export':
           return runDeckSubcommandExport(db, args);
         case 'list':
