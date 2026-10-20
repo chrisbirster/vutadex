@@ -13,7 +13,7 @@ COMMANDS
   deck                  Deck commands
   card                  Card commands
   note                  Logical notes and generated cards
-  media                 Content-addressed local images
+  media                 Content-addressed local images\n  backup                Consistent database and media backups
   study                 Study commands
   progress              Progress commands
 
