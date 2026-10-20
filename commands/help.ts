@@ -14,6 +14,7 @@ COMMANDS
   card                  Card commands
   note                  Logical notes and generated cards
   media                 Content-addressed local images
+  backup                Consistent database and media backups
   study                 Study commands
   progress              Progress commands
 
@@ -33,6 +34,10 @@ NOTES
   note show <note-id>    Show fields and generated cards
   note edit <note-id> <fields...> Update note without resetting FSRS
   note delete <note-id> [--yes] Retire note and preserve history
+
+BACKUP
+  backup create <file>  Save SQLite plus verified media
+  backup restore <file> Restore only to an empty data directory
 
 MEDIA
   media add <image-path> Store local PNG/JPEG/WebP/GIF
