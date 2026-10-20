@@ -1,7 +1,7 @@
 # Vutadex roadmap
 
 M0–M4 released to main (#15, #18, #22, #29, #33).
-M5 Plandalf-style note types released to main (#41). Cleanup v3 source-of-truth integration and test portability are being completed on dev.
+M5 Plandalf-style note types released to main (#41). Cleanup v3 source-of-truth integration and test portability were promoted to main in #48; M5.6 regression hardening was merged to dev in #51.
 Branches: feature/* -> dev -> main using cross-platform CI and a regular milestone release merge.
 
 ## M0 — Foundation
@@ -35,8 +35,8 @@ Branches: feature/* -> dev -> main using cross-platform CI and a regular milesto
 - [x] Final acceptance CI and M5 release to main (#41).
 
 ## M6 — Progress and Portability
-- [ ] M6.1: Study statistics, review activity and UTC saved-due-date forecast (feature PR in progress; not released).
-- [ ] M6.2: .deck v2 export/import with verified format and round-trip tests.
+- [x] M6.1: Study statistics, review activity and UTC saved-due-date forecast (merged to dev in #52; not yet released to main).
+- [ ] M6.2: .deck v2 export/import with verified format and round-trip tests (verified format/safety contract in docs/m6-deck-format.md; code pending).
 - [ ] M6.3: Portable media and validated safe backup/restore.
 - [ ] M6 release acceptance, CI and promotion to main as v0.6.0.
 
