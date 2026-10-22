@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getDataHome } from '../utils/paths.ts';
-import { APP_NAME, MAX_IMAGE_BYTES, MEDIA_REFERENCE_PATTERN, MEDIA_REFERENCE_PREFIX } from '../constants.ts';
+import { getAppDirectory } from '../utils/paths.ts';
+import { MAX_IMAGE_BYTES, MEDIA_REFERENCE_PATTERN, MEDIA_REFERENCE_PREFIX } from '../constants.ts';
 
 export class MediaError extends Error { }
 
 function storageDir(): string {
-  return path.join(getDataHome(), APP_NAME, 'media');
+  return path.join(getAppDirectory(), 'media');
 }
 
 function sha256(bytes: Buffer): string {

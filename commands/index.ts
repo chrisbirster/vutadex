@@ -7,6 +7,8 @@ import { runNoteCommand } from './note.ts';
 import { runMediaCommand } from './media.ts';
 import { runDueCommand } from './due.ts';
 import { runStudyCommand } from './study.ts';
+import { runDoctorCommand } from './doctor.ts';
+import { runUpdateCommand } from './update.ts';
 import { runStatsCommand } from './stats.ts';
 
 export default {
@@ -19,5 +21,7 @@ export default {
   runMediaCommand,
   runDueCommand,
   runStudyCommand,
+  runDoctorCommand,
+  runUpdateCommand,
   runStatsCommand,
 }

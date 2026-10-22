@@ -9,7 +9,8 @@ USAGE
 COMMANDS
   help                  Show this help message
   version               Show version
-  doctor                Show setup status
+  doctor                Check data, database and available updates; repair if needed
+  update                Install the latest Vutadex release
   deck                  Deck commands
   card                  Card commands
   note                  Logical notes and generated cards

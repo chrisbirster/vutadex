@@ -28,6 +28,10 @@ export async function main(args: string[]): Promise<number> {
       return commands.runDueCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'study':
       return commands.runStudyCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
+    case 'doctor':
+      return commands.runDoctorCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
+    case 'update':
+      return commands.runUpdateCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     case 'stats':
       return commands.runStatsCommand(subcommand === undefined ? [] : [subcommand, ...rest]);
     default:

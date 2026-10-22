@@ -4,7 +4,7 @@ import type { UserVersion } from '../models/schema.ts';
 
 const USER_VERSION_SQL = loadQueryByFilename('schema/user-version.sql');
 
-function readVersion(db: DatabaseSync): number {
+export function readVersion(db: DatabaseSync): number {
   return queryOne<UserVersion>(db, USER_VERSION_SQL)?.user_version ?? 0;
 }
 
@@ -37,6 +37,11 @@ function applyMigrations(db: DatabaseSync, currentMigrationVersion: number, migr
       throw error;
     }
   }
+}
+
+/** The schema version a fully migrated database has: one per migration file. */
+export function latestVersion(): number {
+  return listMigrationFiles().length;
 }
 
 export function migrate(db: DatabaseSync): void {
