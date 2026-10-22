@@ -4,6 +4,8 @@ import { runDeckSubcommandList } from './list.ts';
 import { runDeckSubcommandShow } from './show.ts';
 import { runDeckSubcommandRename } from './rename.ts';
 import { runDeckSubcommandDescribe } from './describe.ts';
+import { runDeckSubcommandImport } from './import.ts';
+import { runDeckSubcommandExport } from './export.ts';
 
 export default {
   runDeckSubcommandCreate,
@@ -11,5 +13,7 @@ export default {
   runDeckSubcommandList,
   runDeckSubcommandShow,
   runDeckSubcommandRename,
-  runDeckSubcommandDescribe
+  runDeckSubcommandDescribe,
+  runDeckSubcommandImport,
+  runDeckSubcommandExport
 };

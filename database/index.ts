@@ -7,6 +7,7 @@ import { APP_NAME, DB_NAME } from '../constants.ts';
 
 export function getDatabase(): DatabaseSync {
   const directory = path.join(getDataHome(), APP_NAME);
+  // TODO: create a doctor command that does this once
   fs.mkdirSync(directory, { recursive: true });
   const db = new DatabaseSync(path.join(directory, DB_NAME));
   try {

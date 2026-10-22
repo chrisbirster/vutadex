@@ -14,9 +14,9 @@ export function showUsageInformation(): number {
   return 1;
 }
 
-export function parseDeckId(raw: string | undefined): number {
-  const id = Number(raw);
-  if (!raw || !POSITIVE_INTEGER_PATTERN.test(raw) || !Number.isSafeInteger(id)) {
+export function parseDeckId(userProvidedId: string | undefined): number {
+  const id = Number(userProvidedId);
+  if (!userProvidedId || !POSITIVE_INTEGER_PATTERN.test(userProvidedId) || !Number.isSafeInteger(id)) {
     throw new DeckError('Expected a positive integer deck ID.');
   }
   return id;

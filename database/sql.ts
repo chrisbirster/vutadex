@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { MIGRATION_FILE_PATTERN } from '../constants.ts';
 import type { DatabaseSync, SQLInputValue, StatementResultingChanges } from 'node:sqlite';
 
 /**
@@ -18,18 +19,18 @@ export function loadMigrationByFilename(filename: string): string {
   return readFileSync(new URL(`./migrations/${filename}`, import.meta.url), 'utf8');
 }
 
-const MIGRATION_FILE = /^(\d+)_.+\.sql$/;
-const MIGRATION_DIRECTORY = fileURLToPath(new URL('./migrations/', import.meta.url))
-
 /**
 * Lists migration filenames in version order, e.g. ['001_x.sql', '002_x.sql'].
 * Throws on a gap or duplicate in the numbering, because migrate() treats a file's
 * position as its schema version. Files that do not match NNN_name.sql are ignored.
 */
-export function listMigrationFiles(directory = MIGRATION_DIRECTORY): string[] {
-  const migrationFilesFound = readdirSync(directory)
-    .map(name => ({ name, version: Number(MIGRATION_FILE.exec(name)?.[1]) }))
-    .filter(file => MIGRATION_FILE.test(file.name))
+export function listMigrationFiles(): string[] {
+  MIGRATION_FILE_PATTERN
+  const MIGRATION_DIRECTORY = fileURLToPath(new URL('./migrations/', import.meta.url))
+
+  const migrationFilesFound = readdirSync(MIGRATION_DIRECTORY)
+    .map(name => ({ name, version: Number(MIGRATION_FILE_PATTERN.exec(name)?.[1]) }))
+    .filter(file => MIGRATION_FILE_PATTERN.test(file.name))
     .sort((a, b) => a.version - b.version);
   migrationFilesFound.forEach((file, index) => {
     if (file.version !== index + 1) {

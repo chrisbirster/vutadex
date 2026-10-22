@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, StatementResultingChanges } from 'node:sqlite';
 import { execute, loadQueryByFilename, queryAll, queryOne } from '../database/sql.ts';
 import { MAX_DECK_NAME_LENGTH, MAX_DESCRIPTION_LENGTH } from '../constants.ts';
 import type { Deck, DeckIdRow } from '../models/deck.ts';
@@ -135,7 +135,6 @@ export function describeDeck(db: DatabaseSync, deckId: number, description: stri
  *
  * @throws {DeckError} If the deck does not exist.
  */
-export function deleteDeck(db: DatabaseSync, deckId: number): void {
-  getDeck(db, deckId); // existence check; the DELETE below would silently match nothing
-  execute(db, DELETE_DECK_SQL, deckId);
+export function deleteDeck(db: DatabaseSync, deckId: number): StatementResultingChanges {
+  return execute(db, DELETE_DECK_SQL, deckId);
 }

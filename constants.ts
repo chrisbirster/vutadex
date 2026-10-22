@@ -29,3 +29,5 @@ export const MEDIA_REFERENCE_PATTERN = /^deez-media:\/\/sha256:([0-9a-f]{64})$/;
 // Parsing
 /** A positive integer with no sign, leading zeros or separators, e.g. "7" but not "0" or "007". */
 export const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
+
+export const MIGRATION_FILE_PATTERN = /^(\d+)_.+\.sql$/;
