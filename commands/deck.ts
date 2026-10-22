@@ -1,9 +1,8 @@
 import { getDatabase } from '../database/index.ts';
 import { DeckError } from '../services/decks.ts';
+import { DeckFileError } from '../services/deck-file.ts';
 import { showUsageInformation } from './deck/utils.ts';
-import cmds from './deck/index.ts';
-import { runDeckSubcommandExport } from './deck/export.ts';
-import { runDeckSubcommandImport } from './deck/import.ts';
+import deckSubcommands from './deck/index.ts';
 
 export async function runDeckCommand(subcommand: string | undefined, args: string[]): Promise<number> {
   if (!subcommand) return showUsageInformation();
@@ -11,30 +10,31 @@ export async function runDeckCommand(subcommand: string | undefined, args: strin
     const db = getDatabase();
     try {
       switch (subcommand) {
-        case 'delete':
-          return await cmds.runDeckSubcommandDelete(db, args);
-        case 'import':
-          return runDeckSubcommandImport(db, args);
-        case 'export':
-          return runDeckSubcommandExport(db, args);
         case 'list':
-          return cmds.runDeckSubcommandList(db, args);
+          return deckSubcommands.runDeckSubcommandList(db, args);
         case 'create':
-          return cmds.runDeckSubcommandCreate(db, args);
+          return deckSubcommands.runDeckSubcommandCreate(db, args);
+        case 'import':
+          return deckSubcommands.runDeckSubcommandImport(db, args);
+        case 'export':
+          return deckSubcommands.runDeckSubcommandExport(db, args);
         case 'show':
-          return cmds.runDeckSubcommandShow(db, args);
+          return deckSubcommands.runDeckSubcommandShow(db, args);
         case 'rename':
-          return cmds.runDeckSubcommandRename(db, args);
+          return deckSubcommands.runDeckSubcommandRename(db, args);
         case 'describe':
-          return cmds.runDeckSubcommandDescribe(db, args);
+          return deckSubcommands.runDeckSubcommandDescribe(db, args);
+        case 'delete':
+          return await deckSubcommands.runDeckSubcommandDelete(db, args);
         default:
+          console.error(`Unknown deck subcommand "${subcommand}".`);
           return showUsageInformation();
       }
     } finally {
       db.close();
     }
   } catch (error) {
-    if (error instanceof DeckError) {
+    if (error instanceof DeckError || error instanceof DeckFileError) {
       console.error(error.message);
       return 1;
     }

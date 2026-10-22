@@ -7,6 +7,7 @@ export const DB_NAME = 'vdex.db';
 // Text limits, in UTF-16 code units (what String#length counts)
 export const MAX_DECK_NAME_LENGTH = 120;
 export const MAX_DESCRIPTION_LENGTH = 2000;
+export const MAX_IMPORT_BYTES = 64 * 1024 * 1024;
 
 /** Card front/back, note fields and generated card text. */
 export const MAX_TEXT_LENGTH = 10000;

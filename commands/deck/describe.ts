@@ -1,11 +1,15 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { describeDeck } from '../../services/decks.ts';
+import { parseCommandArgs } from '../utils.ts';
 import { showUsageInformation, parseDeckId } from './utils.ts';
 
 export function runDeckSubcommandDescribe(db: DatabaseSync, args: string[]): number {
-  if (args.length < 2) return showUsageInformation();
-  if (args[1] === '--clear' && args.length !== 2) return showUsageInformation();
-  const deck = describeDeck(db, parseDeckId(args[0]), args[1] === '--clear' ? null : args.slice(1).join(' '));
+  const parsedArgs = parseCommandArgs(args, ['clear'], 1, Infinity);
+  if (!parsedArgs) return showUsageInformation();
+  const [deckIdText, ...descriptionWords] = parsedArgs.positionals;
+  const isClearing = parsedArgs.flags.clear;
+  if (isClearing === (descriptionWords.length > 0)) return showUsageInformation(); // exactly one of text or --clear
+  const deck = describeDeck(db, parseDeckId(deckIdText), isClearing ? null : descriptionWords.join(' '));
   console.log(`Updated description for deck ${deck.id}.`);
   return 0;
 }

@@ -1,33 +1,38 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { deleteDeck, getDeck } from '../../services/decks.ts';
-import { showUsageInformation, parseDeckId } from './utils.ts';
+import type { Deck } from '../../models/deck.ts';
 import { parseCommandArgs } from '../utils.ts';
 import { createTerminalInteraction } from '../terminal.ts';
 import type { TerminalInteraction } from '../terminal.ts';
+import { showUsageInformation, parseDeckId } from './utils.ts';
 
+type DeletionDecision = 'confirmed' | 'cancelled' | 'needs-terminal';
 
-export async function runDeckSubcommandDelete(db: DatabaseSync, args: string[], terminal: TerminalInteraction = createTerminalInteraction()) {
+async function decideDeletion(deck: Deck, skipConfirmation: boolean, terminal: TerminalInteraction): Promise<DeletionDecision> {
+  if (skipConfirmation) return 'confirmed';
+  if (terminal.isTTY) {
+    const isConfirmed = await terminal.confirm(`Delete deck "${deck.name}" and its cards? [y/N] `);
+    return isConfirmed ? 'confirmed' : 'cancelled';
+  }
+  return 'needs-terminal';
+}
 
-  const parsed = parseCommandArgs(args, ['yes'], 1, 1);
-  if (!parsed) return showUsageInformation();
-
-  // TODO: rename to parseDeckIdFromInput?
-  const id = parseDeckId(parsed.positionals[0]);
-  const deck = getDeck(db, id);
-  if (!parsed.flags.yes) {
-    if (!terminal.isTTY) {
-      console.error('Deletion requires confirmation in a terminal or --yes.');
-      return 1;
-    }
-    const confirmed = await terminal.confirm(`Delete deck "${deck.name}" and its cards? [y/N] `);
-    if (!confirmed) {
+export async function runDeckSubcommandDelete(
+  db: DatabaseSync, args: string[], terminal: TerminalInteraction = createTerminalInteraction()
+): Promise<number> {
+  const parsedArgs = parseCommandArgs(args, ['yes'], 1, 1);
+  if (!parsedArgs) return showUsageInformation();
+  const deck = getDeck(db, parseDeckId(parsedArgs.positionals[0]));
+  switch (await decideDeletion(deck, parsedArgs.flags.yes, terminal)) {
+    case 'cancelled':
       console.log('Deletion cancelled.');
       return 0;
-    }
+    case 'needs-terminal':
+      console.error('Deletion requires confirmation in a terminal or --yes.');
+      return 1;
+    case 'confirmed':
+      deleteDeck(db, deck.id);
+      console.log(`Deleted deck ${deck.id}.`);
+      return 0;
   }
-  const results = deleteDeck(db, id);
-  let output = "";
-  (results.changes > 0) ? output = `Deleted deck ${id}.` : `Unable to delete deck ${id}`;
-  console.log(output);
-  return 0;
 }

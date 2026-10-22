@@ -106,3 +106,37 @@ test('FSRS-7 card reviews persist across process restarts and undo reverts them'
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('deck options may appear anywhere and dash-leading text follows --', () => {
+  const home = mkdtempSync(join(tmpdir(), 'vutadex-deck-args-'));
+  try {
+    assert.equal(run(['deck', 'create', '--description', 'Dates', 'History'], home).status, 0);
+    assert.equal(run(['deck', 'create', 'Maths', '--description', 'Numbers'], home).status, 0);
+    assert.equal(run(['deck', 'create', '--', '-Dashed'], home).status, 0);
+    assert.match(run(['deck', 'list'], home).stdout, /-Dashed/);
+    assert.equal(run(['deck', 'create', 'Equals', '--description=Dates'], home).status, 0);
+    assert.equal(run(['deck', 'create', 'DashValue', '--description=-x'], home).status, 0);
+    assert.match(run(['deck', 'show', '4'], home).stdout, /Dates/);
+    assert.match(run(['deck', 'show', '5'], home).stdout, /-x/);
+    assert.equal(run(['deck', 'describe', '1', '--clear=yes'], home).status, 1);
+    assert.equal(run(['deck', 'describe', '--clear', '1'], home).status, 0);
+    assert.equal(run(['deck', 'describe', '1', 'x', '--clear'], home).status, 1);
+    assert.equal(run(['deck', 'describe', '1'], home).status, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('deck delete, rename and import report errors without a stack trace', () => {
+  const home = mkdtempSync(join(tmpdir(), 'vutadex-deck-errors-'));
+  try {
+    for (const args of [['deck', 'delete', '9', '--yes'], ['deck', 'rename', '9', 'X'], ['deck', 'import', join(home, 'missing.deck')]]) {
+      const result = run(args, home);
+      assert.equal(result.status, 1, args.join(' '));
+      assert.doesNotMatch(result.stderr, /\n\s+at /, args.join(' '));
+    }
+    assert.match(run(['deck', 'bogus'], home).stderr, /Unknown deck subcommand "bogus"/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

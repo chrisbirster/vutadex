@@ -1,4 +1,5 @@
-import type { DatabaseSync, StatementResultingChanges } from 'node:sqlite';
+import assert from 'node:assert/strict';
+import type { DatabaseSync } from 'node:sqlite';
 import { execute, loadQueryByFilename, queryAll, queryOne } from '../database/sql.ts';
 import { MAX_DECK_NAME_LENGTH, MAX_DESCRIPTION_LENGTH } from '../constants.ts';
 import type { Deck, DeckIdRow } from '../models/deck.ts';
@@ -99,7 +100,9 @@ export function createDeck(db: DatabaseSync, userInputName: string, userInputDes
   const cleanedDeckDescription = validateDeckDescription(userInputDescription);
   ensureDeckNameUnique(db, cleanedDeckName);
   const newDeckResult = execute(db, CREATE_DECK_SQL, cleanedDeckName, cleanedDeckDescription);
-  return getDeck(db, Number(newDeckResult.lastInsertRowid));
+  const deck = getDeck(db, Number(newDeckResult.lastInsertRowid));
+  assert.equal(deck.name, cleanedDeckName);
+  return deck;
 }
 
 /**
@@ -110,9 +113,12 @@ export function createDeck(db: DatabaseSync, userInputName: string, userInputDes
  */
 export function renameDeck(db: DatabaseSync, userInputDeckId: number, deckNameWanted: string): Deck {
   const cleanedDeckName = validateDeckName(deckNameWanted);
+  getDeck(db, userInputDeckId); // existence check; the UPDATE below would silently match nothing
   ensureDeckNameUnique(db, cleanedDeckName, userInputDeckId);
   execute(db, RENAME_DECK_SQL, cleanedDeckName, userInputDeckId);
-  return getDeck(db, userInputDeckId);
+  const deck = getDeck(db, userInputDeckId);
+  assert.equal(deck.name, cleanedDeckName);
+  return deck;
 }
 
 /**
@@ -125,7 +131,9 @@ export function describeDeck(db: DatabaseSync, deckId: number, description: stri
   const cleanedDescription = validateDeckDescription(description);
   getDeck(db, deckId); // existence check; the UPDATE below would silently match nothing
   execute(db, DESCRIBE_DECK_SQL, cleanedDescription, deckId);
-  return getDeck(db, deckId);
+  const deck = getDeck(db, deckId);
+  assert.equal(deck.description, cleanedDescription);
+  return deck;
 }
 
 /**
@@ -135,6 +143,8 @@ export function describeDeck(db: DatabaseSync, deckId: number, description: stri
  *
  * @throws {DeckError} If the deck does not exist.
  */
-export function deleteDeck(db: DatabaseSync, deckId: number): StatementResultingChanges {
-  return execute(db, DELETE_DECK_SQL, deckId);
+export function deleteDeck(db: DatabaseSync, deckId: number): void {
+  getDeck(db, deckId); // existence check; the DELETE below would silently match nothing
+  const deleteResult = execute(db, DELETE_DECK_SQL, deckId);
+  assert.equal(deleteResult.changes, 1);
 }
