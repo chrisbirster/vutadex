@@ -19,3 +19,7 @@ test('unpadded numbers sort numerically', () => {
 test('a gap in the numbering is rejected', () => {
   assert.throws(() => listMigrationFiles(fixture('gap')), /004_d\.sql is out of sequence; expected version 3/);
 });
+
+test('a duplicate number is rejected', () => {
+  assert.throws(() => listMigrationFiles(fixture('duplicate-number')), /out of sequence/);
+});
