@@ -17,13 +17,8 @@ async function decideDeletion(deck: Deck, skipConfirmation: boolean, terminal: T
   return 'needs-terminal';
 }
 
-export async function runDeckSubcommandDelete(
-  db: DatabaseSync, args: string[], terminal: TerminalInteraction = createTerminalInteraction()
-): Promise<number> {
-  const parsedArgs = parseCommandArgs(args, ['yes'], 1, 1);
-  if (!parsedArgs) return showUsageInformation();
-  const deck = getDeck(db, parseDeckId(parsedArgs.positionals[0]));
-  switch (await decideDeletion(deck, parsedArgs.flags.yes, terminal)) {
+function applyDeletionDecision(db: DatabaseSync, deckId: number, decision: DeletionDecision): number {
+  switch (decision) {
     case 'cancelled':
       console.log('Deletion cancelled.');
       return 0;
@@ -31,8 +26,19 @@ export async function runDeckSubcommandDelete(
       console.error('Deletion requires confirmation in a terminal or --yes.');
       return 1;
     case 'confirmed':
-      deleteDeck(db, deck.id);
-      console.log(`Deleted deck ${deck.id}.`);
+      deleteDeck(db, deckId);
+      console.log(`Deleted deck ${deckId}.`);
       return 0;
   }
+}
+
+export async function runDeckSubcommandDelete(
+  db: DatabaseSync, args: string[], terminal: TerminalInteraction = createTerminalInteraction()
+): Promise<number> {
+  const parsedArgs = parseCommandArgs(args, ['yes'], 1, 1);
+  if (!parsedArgs) return showUsageInformation();
+  const deckId = parseDeckId(parsedArgs.positionals[0]);
+  const deck = getDeck(db, deckId);
+  const decision = await decideDeletion(deck, parsedArgs.flags.yes, terminal);
+  return applyDeletionDecision(db, deckId, decision);
 }
