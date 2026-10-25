@@ -13,7 +13,7 @@ const queryDir=fileURLToPath(new URL('../dist/database/query/',import.meta.url))
 test('compiled CLI retains all migrations and queries and runs without TypeScript loader',()=>{
   assert.ok(existsSync(entry),'Run npm run build before packaged smoke tests.');
   assert.deepEqual(readdirSync(migrationDir).filter(x=>x.endsWith('.sql')).sort(),
-    ['001_initial.sql','002_fsrs.sql','003_study_sessions.sql','004_notes.sql']);
+    ['001_initial.sql','002_fsrs.sql','003_study_sessions.sql','004_notes.sql','005_unique_deck_names.sql']);
   assert.ok(existsSync(join(queryDir,'decks','list.sql')));
   assert.ok(existsSync(join(queryDir,'study','candidates.sql')));
   const home=mkdtempSync(join(tmpdir(),'vutadex-packaged-'));

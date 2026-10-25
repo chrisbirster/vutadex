@@ -71,6 +71,18 @@ function ensureDeckNameUnique(db: DatabaseSync, deckNameWanted: string, excludeD
   if (isDeckNameTaken && isDeckNameTaken.id !== excludeDeckId) throw new DeckError('A deck with that name already exists.');
 }
 
+/** The SQL unique index closes the cross-process gap after our early lookup. */
+function executeUniqueDeckNameWrite(db: DatabaseSync, sql: string, ...params: (string | number | null)[]) {
+  try {
+    return execute(db, sql, ...params);
+  } catch (error) {
+    if (error instanceof Error && /UNIQUE constraint failed: decks\.name/i.test(error.message)) {
+      throw new DeckError('A deck with that name already exists.');
+    }
+    throw error;
+  }
+}
+
 /**
  * Loads one deck, including its live `card_count`.
  *
@@ -98,7 +110,7 @@ export function createDeck(db: DatabaseSync, userInputName: string, userInputDes
   const cleanedDeckName = validateDeckName(userInputName);
   const cleanedDeckDescription = validateDeckDescription(userInputDescription);
   ensureDeckNameUnique(db, cleanedDeckName);
-  const newDeckResult = execute(db, CREATE_DECK_SQL, cleanedDeckName, cleanedDeckDescription);
+  const newDeckResult = executeUniqueDeckNameWrite(db, CREATE_DECK_SQL, cleanedDeckName, cleanedDeckDescription);
   return getDeck(db, Number(newDeckResult.lastInsertRowid));
 }
 
@@ -111,7 +123,7 @@ export function createDeck(db: DatabaseSync, userInputName: string, userInputDes
 export function renameDeck(db: DatabaseSync, userInputDeckId: number, deckNameWanted: string): Deck {
   const cleanedDeckName = validateDeckName(deckNameWanted);
   ensureDeckNameUnique(db, cleanedDeckName, userInputDeckId);
-  execute(db, RENAME_DECK_SQL, cleanedDeckName, userInputDeckId);
+  executeUniqueDeckNameWrite(db, RENAME_DECK_SQL, cleanedDeckName, userInputDeckId);
   return getDeck(db, userInputDeckId);
 }
 

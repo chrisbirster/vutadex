@@ -22,7 +22,7 @@ test('v3 data migrates to v4 intact, repeatedly, with legacy cards',()=>{
     const reviewed=reviewCard(db,cardId,3,new Date('2026-01-01T00:00:00Z'));
     db.exec('DROP TABLE generated_cards; DROP TABLE notes; PRAGMA user_version=3');
     migrate(db);migrate(db);
-    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version,4);
+    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version,5);
     assert.deepEqual(getSchedule(db,cardId),reviewed);
     assert.equal(reviewHistory(db,cardId).length,1);
     assert.deepEqual(listNotes(db,deckId),[]);
