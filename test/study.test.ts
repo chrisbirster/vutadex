@@ -23,7 +23,7 @@ test('SQLite v3 migration is idempotent and preserves existing cards and schedul
     reviewCard(db, cards[0]!, 3, new Date('2026-01-01T00:00:00Z'));
     const before = getSchedule(db, cards[0]!);
     migrate(db);
-    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version: number}).user_version, 4);
+    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version: number}).user_version, 5);
     assert.deepEqual(getSchedule(db, cards[0]!), before);
   } finally { db.close(); }
 });
@@ -110,7 +110,7 @@ test('v2 database migrates to v3 without losing FSRS state and review events', (
     // Re-create the exact v2 -> v3 starting state while retaining M3 data.
     db.exec('DROP TABLE generated_cards; DROP TABLE notes; DROP TABLE study_session_items; DROP TABLE study_sessions; PRAGMA user_version = 2');
     migrate(db);
-    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version: number}).user_version, 4);
+    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version: number}).user_version, 5);
     assert.deepEqual(getSchedule(db, id), schedule);
     assert.deepEqual(reviewHistory(db, id), events);
     const session = openStudySession(db, {mode: 'all', newLimit: 0, reviewLimit: 1});
