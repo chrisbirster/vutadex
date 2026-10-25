@@ -90,7 +90,7 @@ export function restoreBackup(filename: string, appDir = path.join(getDataHome()
     try {
       const result = db.prepare('PRAGMA integrity_check').get() as {integrity_check:string};
       const version = db.prepare('PRAGMA user_version').get() as {user_version:number};
-      if (result.integrity_check !== 'ok' || version.user_version !== 4) {
+      if (result.integrity_check !== 'ok' || (version.user_version !== 4 && version.user_version !== 5)) {
         throw new BackupError('Backup SQLite integrity or schema version is invalid.');
       }
     } finally { db.close(); }
