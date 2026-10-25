@@ -13,7 +13,7 @@ test('npm tarball contains executable and every canonical SQL asset', () => {
   const names = new Set(output[0]!.files.map(item => item.path));
   assert.ok(names.has('dist/index.js'), 'compiled CLI missing');
   for (const filename of [
-    '001_initial.sql', '002_fsrs.sql', '003_study_sessions.sql', '004_notes.sql'
+    '001_initial.sql', '002_fsrs.sql', '003_study_sessions.sql', '004_notes.sql', '005_unique_deck_names.sql'
   ]) {
     assert.ok(names.has('dist/database/migrations/' + filename), filename);
   }
