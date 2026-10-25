@@ -20,13 +20,14 @@ test('v1 database upgrades through latest schema and migration is idempotent', (
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('PRAGMA user_version=1');
+    db.exec('CREATE TABLE decks (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)');
     db.exec('CREATE TABLE cards (id INTEGER PRIMARY KEY, deck_id INTEGER, front TEXT, back TEXT)');
     // v1 includes original decks table; migration v2 must not replace existing data.
     db.exec('INSERT INTO cards VALUES (1, 1, \'old\', \'card\')');
     migrate(db);
     migrate(db);
     const version = db.prepare('PRAGMA user_version').get() as { user_version: number };
-    assert.equal(version.user_version, 4);
+    assert.equal(version.user_version, 5);
     assert.equal((db.prepare('SELECT front FROM cards WHERE id=1').get() as { front: string }).front, 'old');
   } finally { db.close(); }
 });
