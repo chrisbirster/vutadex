@@ -21,6 +21,54 @@ const DAY_MS = 86400000;
 
 export class ReviewError extends Error { }
 
+/** SQLite rows and JSON snapshots are untrusted even when assigned TS types. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function isIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
+
+/**
+ * Validate stored scheduling state before it can affect FSRS or be restored
+ * during undo. All checks run at the persistence boundary, not in hot math.
+ */
+function checkedSchedule(value: unknown): Schedule {
+  if (!isObject(value) || !isObject(value.state)) {
+    throw new ReviewError('Corrupt stored review schedule.');
+  }
+  const state = value.state;
+  const validStability = (n: unknown): n is number =>
+    typeof n === 'number' && Number.isFinite(n) && n >= 1e-4 && n <= 36500;
+  const difficulty = state.difficulty;
+  const reviewCount = value.reviewCount;
+  if (!validStability(state.stability) || !validStability(state.fastStability) ||
+      typeof difficulty !== 'number' || !Number.isFinite(difficulty) ||
+      difficulty < 1 || difficulty > 10 ||
+      typeof reviewCount !== 'number' || !Number.isSafeInteger(reviewCount) || reviewCount < 1 ||
+      !isIsoTimestamp(value.lastReviewAt) || !isIsoTimestamp(value.dueAt)) {
+    throw new ReviewError('Corrupt stored review schedule.');
+  }
+  return {
+    state: { stability: state.stability, difficulty, fastStability: state.fastStability },
+    lastReviewAt: value.lastReviewAt,
+    dueAt: value.dueAt,
+    reviewCount
+  };
+}
+
+function parseStoredSchedule(json: string): Schedule {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new ReviewError('Corrupt stored review schedule.');
+  }
+  return checkedSchedule(parsed);
+}
+
 /** @throws {ReviewError} If `now` is not a valid date. */
 function toTimestamp(now: Date): string {
   if (!Number.isFinite(now.getTime())) throw new ReviewError('Invalid review date.');
@@ -37,10 +85,10 @@ function readSchedule(db: DatabaseSync, cardId: number): Schedule | null {
   if (row.scheduler_version !== FSRS_VERSION) {
     throw new ReviewError('Unsupported scheduler version in saved card; migration required.');
   }
-  return {
+  return checkedSchedule({
     state: { stability: row.stability, difficulty: row.difficulty, fastStability: row.fast_stability },
     lastReviewAt: row.last_review_at, dueAt: row.due_at, reviewCount: row.review_count
-  };
+  });
 }
 /**
  * Loads a card's FSRS schedule, or `null` if it has never been reviewed.
@@ -130,7 +178,7 @@ export function undoReview(
     if (!current || JSON.stringify(current) !== latest.after_json) {
       throw new ReviewError('Review history does not match current schedule.');
     }
-    const before: Schedule | null = latest.before_json ? JSON.parse(latest.before_json) as Schedule : null;
+    const before: Schedule | null = latest.before_json ? parseStoredSchedule(latest.before_json) : null;
     putSchedule(db, cardId, before);
     execute(db, INSERT_UNDO_EVENT_SQL, cardId, timestamp, JSON.stringify(current), before ? JSON.stringify(before) : null,
       latest.id, FSRS_VERSION);
