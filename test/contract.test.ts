@@ -57,7 +57,7 @@ test('production can skip postconditions without skipping input or requires', ()
 });
 
 test('contract parsers reject invalid arities at definition and invocation', () => {
-  assert.throws(() => finiteNumbers(-1), RangeError);
+  assert.throws(() => finiteNumbers(-1 as number), RangeError);
   assert.throws(() => finiteNumbers(17), RangeError);
-  assert.throws(() => finiteNumbers(1.5), RangeError);
+  assert.throws(() => finiteNumbers(1.5 as number), RangeError);
 });
