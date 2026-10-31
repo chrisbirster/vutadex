@@ -85,12 +85,13 @@ const routeDeckNew=createRoute({getParentRoute:()=>routeRoot,path:'/decks/new',c
 const routeDeckDetail=createRoute({getParentRoute:()=>routeRoot,path:'/decks/$deckId',component:DeckDetailPage});
 const routeNoteEdit=createRoute({getParentRoute:()=>routeRoot,path:'/notes/$noteId/edit',component:EditNotePage});
 const routeImport=createRoute({getParentRoute:()=>routeRoot,path:'/import',component:ImportPage});
+const routeHistory=createRoute({getParentRoute:()=>routeRoot,path:'/migration/full',component:HistoryMigrationPage});
 const routeCardNew=createRoute({getParentRoute:()=>routeRoot,path:'/cards/new',validateSearch:(search:Record<string,unknown>)=>({deckId:typeof search.deckId==='string'?search.deckId:undefined}),component:CardEditorPage});
 const routeStudy=createRoute({getParentRoute:()=>routeRoot,path:'/study',component:StudyStartPage});
 const routeStudySession=createRoute({getParentRoute:()=>routeRoot,path:'/study/$sessionId',component:StudySessionPage});
 const routeStats=createRoute({getParentRoute:()=>routeRoot,path:'/stats',component:StatsPage});
 const routeSettings=createRoute({getParentRoute:()=>routeRoot,path:'/settings',component:SettingsPage});
-const routeTree=routeRoot.addChildren([routeHome,routeLogin,routeVerify,routeDecks,routeDeckNew,routeDeckDetail,routeCardNew,routeNoteEdit,routeImport,routeStudy,routeStudySession,routeStats,routeSettings]);
+const routeTree=routeRoot.addChildren([routeHome,routeLogin,routeVerify,routeDecks,routeDeckNew,routeDeckDetail,routeCardNew,routeNoteEdit,routeImport,routeHistory,routeStudy,routeStudySession,routeStats,routeSettings]);
 const router=createRouter({routeTree,defaultPreload:'intent'});
 declare module '@tanstack/react-router' {interface Register {router:typeof router;}}
 function Bongo({mood='happy',size='regular'}:{mood?:'happy'|'sleepy'|'thinking'|'hype';size?:'regular'|'large'}){
@@ -400,7 +401,7 @@ function SettingsPage(){
         <button className="primary">Save Timezone</button>
       </form>
       {message&&<div className="success" role="status">{message}</div>}
-      <h3>Device Sessions</h3>
+      <div className="actions"><Link to="/migration/full" className="button secondary">Import CLI History</Link></div><h3>Device Sessions</h3>
       {devices?.sessions.map(d=><div className="breakdown" key={d.id}>
         <span>Last used {new Date(d.last_seen).toLocaleString()}</span>
         <button className="secondary" onClick={()=>void revoke(d.id)}>Revoke</button>
@@ -409,6 +410,43 @@ function SettingsPage(){
       <Notice text={error}/>
     </div></>;
 }
+
+function HistoryMigrationPage(){
+  const [bundle,setBundle]=useState<unknown>(null),[report,setReport]=useState<{sourceId:string;checksum:string;summary:{decks:number;notes:number;cards:number;schedules:number;reviews:number;undos:number}}|null>(null);
+  const [approved,setApproved]=useState(false),[error,setError]=useState(''),[result,setResult]=useState('');
+  const [busy,setBusy]=useState(false);
+  async function select(file:File|undefined){
+    if(!file)return;setError('');setReport(null);setBundle(null);setApproved(false);
+    if(file.size>3_500_000){setError('History file exceeds the 3.5 MiB single-transaction limit.');return;}
+    try{
+      const parsed=JSON.parse(await file.text()) as unknown;
+      setBundle(parsed);setBusy(true);
+      const preview=await api<typeof report>('/migration/full/preview',{method:'POST',body:{bundle:parsed}});
+      setReport(preview);
+    }catch(e){setError(String(e));}finally{setBusy(false);}
+  }
+  async function importHistory(){
+    if(!approved||!bundle||!report)return;setError('');setBusy(true);
+    try{
+      const r=await api<{duplicate:boolean;sourceId:string}>('/migration/full/commit',{method:'POST',body:{bundle,confirmation:'IMPORT_MY_HISTORY'}});
+      setResult(r.duplicate?'This exact snapshot was already imported. No data was duplicated.':'Full history saved to this signed-in account. Existing decks were not replaced.');
+    }catch(e){setError(String(e));}finally{setBusy(false);}
+  }
+  return <><Heading title="Import Your Study History" subtitle="Bring over your reviewed memories, not just your flashcard text."/>
+    <div className="card form-card">
+      <p>First export a private history file from the existing Vutadex CLI with <code>npm run export:legacy-history --workspace @vutadex/web -- /path/to/vutadex.db stable-source-id /private/history.json</code>.</p>
+      <label>Choose your private history JSON file<input type="file" accept=".json,application/json" onChange={e=>void select(e.target.files?.[0])}/></label>
+      <p className="muted">Only import files from your own CLI installation. Imported cards and schedules belong to the account currently signed in. Source schedules must use the matching FSRS version; image-occlusion media and larger archives need an approved migration path.</p>
+      {report&&<div className="card">
+        <h3>Review before importing</h3><p>Source: {report.sourceId}</p>
+        <p>{report.summary.decks} decks, {report.summary.notes} logical notes, {report.summary.cards} cards, {report.summary.schedules} saved schedules, {report.summary.reviews} reviews, {report.summary.undos} undo events.</p>
+        <label className="checkbox-line"><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/> I own this local history and want to import it into this signed-in account.</label>
+        <button className="primary" disabled={!approved||busy} onClick={()=>void importHistory()}>{busy?'Importing...':'Import My Full History'}</button>
+      </div>}
+      {result&&<div role="status" className="success">{result}</div>}<Notice text={error}/>
+    </div></>;
+}
+
 function LoginPage(){const [email,setEmail]=useState('');const [sent,setSent]=useState(false);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [devLink,setDevLink]=useState('');async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{await api('/auth/magic-links',{method:'POST',body:{email}});setSent(true);try{const local=await api<{email:string;link:string}[]>('/dev/inbox');setDevLink(local.filter(x=>x.email===email.trim().toLowerCase()).at(-1)?.link||'');}catch{/* Production does not expose an inbox. */}}catch(e){setError(String(e));}finally{setBusy(false);}}return <div className="auth-card card"><Bongo size="large" mood="hype"/><h1>Welcome to Vutadex.</h1><p>Small cards. Big brain energy.</p>{sent?<><div className="success" role="status">If that email can receive messages, your sign-in link is on its way.</div>{devLink&&<a href={devLink} className="button primary">Open local dev sign-in link</a>}<button onClick={()=>setSent(false)} className="secondary">Try another email</button></>:<form onSubmit={e=>void submit(e)}><label>Email address<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></label><button disabled={busy} className="primary"><Mail size={19}/>{busy?'Sending...':'Send magic link'}</button></form>}<Notice text={error}/><small>Sign in on desktop and phone with the same email to use your saved collection.</small></div>;}
 function VerifyPage(){const {refresh}=useSession();const navigate=useNavigate();const [secret]=useState(()=>{const params=new URLSearchParams(window.location.hash.slice(1));const t=params.get('token')||'';window.history.replaceState(null,'',window.location.pathname);return t;});const [busy,setBusy]=useState(false);const [error,setError]=useState('');async function confirm(){setBusy(true);try{await api('/auth/magic-links/consume',{method:'POST',body:{token:secret}});await refresh();void navigate({to:'/'});}catch(e){setError(String(e));}finally{setBusy(false);}}return <div className="auth-card card"><Bongo mood="thinking"/><h1>Confirm sign-in</h1><p>Ready to let Bongo into your brain?</p>{secret?<button className="primary" disabled={busy} onClick={()=>void confirm()}>{busy?'Confirming...':'Confirm sign-in'}</button>:<p className="notice">This link is missing its token.</p>}<Notice text={error}/><Link to="/login" className="text-link">Request another link</Link></div>;}
 function Loading(){return <div className="loading" role="status"><LoaderCircle className="spin"/> Bongo is retrieving your cards...</div>;}

@@ -411,3 +411,45 @@ test('owned images reject foreign access, script payloads and prune only unrefer
   assert.equal(prune.status,200);
   assert.deepEqual((await prune.json() as {orphans:string[]}).orphans,[]);
 });
+
+test('full-history migration requires verified account confirmation, preserves undo provenance, and is idempotent',async()=>{
+  const user=await session('history-owner@example.com'),stranger=await session('history-stranger@example.com');
+  const sourceId='cli_personal_2026';
+  const bundle={
+    format:'vutadex.full-history',version:1,sourceId,schedulerVersion:'fsrs-7-vutadex-1',
+    decks:[{id:1,name:'Legacy',description:null}],
+    notes:[{id:10,deckId:1,type:'basic',fields:['Old prompt','Old answer'],tags:[]}],
+    cards:[{id:40,deckId:1,noteId:10,key:'note:10:template:0',front:'Old prompt',back:'Old answer'}],
+    schedules:[{cardId:40,stability:10,difficulty:4,fastStability:1,lastReviewAt:'2026-10-20T12:00:00Z',dueAt:'2026-11-20T12:00:00Z',reviewCount:1,schedulerVersion:'fsrs-7-vutadex-1'}],
+    events:[
+      {id:70,cardId:40,eventType:'review',rating:3,occurredAt:'2026-10-20T12:00:00Z',undoneReviewId:null,raw:{id:70,event_type:'review'}},
+      {id:71,cardId:40,eventType:'undo',rating:null,occurredAt:'2026-10-20T12:01:00Z',undoneReviewId:70,raw:{id:71,event_type:'undo'}}
+    ]
+  };
+  const preview=await request('/migration/full/preview','POST',{bundle},user.cookie);
+  assert.equal(preview.status,200);
+  assert.equal((await preview.json() as {summary:{reviews:number;undos:number}}).summary.undos,1);
+  assert.equal((await request('/migration/full/commit','POST',{bundle},user.cookie)).status,400);
+  const imported=await request('/migration/full/commit','POST',{bundle,confirmation:'IMPORT_MY_HISTORY'},user.cookie);
+  assert.equal(imported.status,201);
+  const second=await request('/migration/full/commit','POST',{bundle,confirmation:'IMPORT_MY_HISTORY'},user.cookie);
+  assert.equal(second.status,200);
+  assert.equal((await second.json() as {duplicate:boolean}).duplicate,true);
+  const conflicting=await request('/migration/full/commit','POST',{bundle:{...bundle,decks:[{...bundle.decks[0],name:'Edited'}]},confirmation:'IMPORT_MY_HISTORY'},user.cookie);
+  assert.equal(conflicting.status,409);
+  const status=await request('/migration/full/'+sourceId,'GET',undefined,user.cookie);
+  assert.equal(status.status,200);
+  assert.equal((await request('/migration/full/'+sourceId,'GET',undefined,stranger.cookie)).status,404);
+  const decks=await (await request('/decks','GET',undefined,user.cookie)).json() as {decks:{name:string}[]};
+  assert.equal(decks.decks.filter(d=>d.name.includes('cli_personal_2026')).length,1);
+  const stats=await (await request('/stats','GET',undefined,user.cookie)).json() as {reviews:unknown[]};
+  assert.equal(stats.reviews.length,0,'historical undo excludes the imported review from active stats');
+});
+test('full-history broken references fail before any account data is written',async()=>{
+  const user=await session('history-corrupt@example.com');
+  const bad={format:'vutadex.full-history',version:1,sourceId:'bad_legacy',schedulerVersion:'fsrs-7-vutadex-1',
+    decks:[{id:1,name:'Broken',description:null}],notes:[],cards:[{id:2,deckId:99,noteId:null,key:null,front:'Q',back:'A'}],schedules:[],events:[]};
+  assert.equal((await request('/migration/full/preview','POST',{bundle:bad},user.cookie)).status,400);
+  assert.equal((await request('/migration/full/commit','POST',{bundle:bad,confirmation:'IMPORT_MY_HISTORY'},user.cookie)).status,400);
+  assert.equal((await request('/decks','GET',undefined,user.cookie).then(r=>r.json()) as {decks:unknown[]}).decks.length,0);
+});
