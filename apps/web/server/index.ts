@@ -7,6 +7,8 @@ import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
 import { MediaError, parseBase64Media, refHash } from './media.ts';
+import {PortableError,inspectPortable,createPortable} from './portable.ts';
+import {studyPresentation} from './study-presentation.ts';
 import { MigrationError, parseHistory, parseDate, stableId, type HistoryBundle } from './history.ts';
 import { matureRetention } from './retention.ts';
 import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex, accountDayKey } from './study-policy.ts';
@@ -51,7 +53,7 @@ app.use((req,res,next)=>{
   const requestId=randomUUID(); res.setHeader('x-request-id', requestId);
   const start=now(); res.on('finish',()=>logger.info({requestId,method:req.method,status:res.statusCode,elapsedMs:now()-start},'http')); next();
 });
-app.use(express.json({limit:'4mb'}));
+app.use(express.json({limit:'16mb'}));
 app.use((req,res,next)=>{
   if (!['GET','HEAD','OPTIONS'].includes(req.method) && req.path.startsWith('/api/')) {
     // Same-origin protection for all state changes, including login.
@@ -397,6 +399,63 @@ app.get('/api/v1/decks/:id/export',handler((req,res)=>{
 }));
 
 
+
+// Self-contained content + owned media archive. Deliberately separate from .deck v2,
+// which remains compatible with CLI content-only imports.
+app.get('/api/v1/decks/:id/portable',handler((req,res)=>{
+  const owner=account(req),deckId=String(req.params.id);
+  const deck=query<{name:string;description:string}>('SELECT name,description FROM decks WHERE id=? AND owner_id=?',deckId,owner.id);
+  if(!deck)throw new ApiError(404,'Deck not found');
+  const rows=list<{type:NotePayload['type'];front:string;back:string;tags:string;fields_json:string|null}>(
+    'SELECT type,front,back,tags,fields_json FROM notes WHERE owner_id=? AND deck_id=? ORDER BY created_at,id',owner.id,deckId);
+  const notes=rows.map(row=>validateNote({
+    type:row.type,fields:row.fields_json?JSON.parse(row.fields_json):[row.front,row.back],tags:row.tags
+  }));
+  const hashes=new Set(notes.filter(n=>n.type==='image-occlusion').map(n=>refHash(n.fields[0]!)!));
+  const media=[...hashes].sort().map(hash=>{
+    const item=query<{mime:string;bytes:Uint8Array}>('SELECT mime,bytes FROM media_blobs WHERE owner_id=? AND sha256=?',owner.id,hash);
+    if(!item)throw new ApiError(409,'An image referenced by this deck is missing');
+    return {hash,mime:item.mime,base64:Buffer.from(item.bytes).toString('base64')};
+  });
+  const bundle=createPortable({name:deck.name,description:deck.description,notes,media});
+  inspectPortable(bundle); // fail closed if local data would make a non-restorable archive
+  res.setHeader('content-type','application/json; charset=utf-8');
+  res.setHeader('content-disposition','attachment; filename="vutadex-portable.json"');
+  res.setHeader('cache-control','private, no-store');
+  res.json(bundle);
+}));
+app.post('/api/v1/portable/preview',handler((req,res)=>{
+  account(req);
+  const bundle=inspectPortable(req.body?.bundle);
+  res.json({name:bundle.deck.name,notes:bundle.notes.length,assets:bundle.media.length,
+    cards:bundle.notes.reduce((sum,n)=>sum+generateVariants(n).length,0),checksum:bundle.checksum});
+}));
+app.post('/api/v1/portable/import',handler((req,res)=>{
+  const owner=account(req),archive=inspectPortable(req.body?.bundle);
+  if(req.body?.confirmation!=='IMPORT_PORTABLE')throw new ApiError(400,'Confirmation required');
+  const deckId=randomUUID();
+  try{
+    transaction(()=>{
+      run('INSERT INTO decks(id,owner_id,name,description,created_at) VALUES(?,?,?,?,?)',
+        deckId,owner.id,archive.deck.name,archive.deck.description,now());
+      for(const asset of archive.media){
+        run('INSERT INTO media_blobs(owner_id,sha256,mime,bytes,width,height,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner_id,sha256) DO NOTHING',
+          owner.id,asset.hash,asset.mime,asset.bytes,asset.width,asset.height,now());
+        emitChange(owner.id,'created','media',asset.hash);
+      }
+      for(const note of archive.notes){
+        const saved=writeNote(owner.id,deckId,note);
+        emitChange(owner.id,'created','note',saved.id);
+      }
+      emitChange(owner.id,'created','deck',deckId);
+    });
+  }catch(error){
+    if(String(error).includes('UNIQUE'))throw new ApiError(409,'Deck name already exists');
+    throw error;
+  }
+  res.status(201).json({deckId,notes:archive.notes.length,assets:archive.media.length});
+}));
+
 app.post('/api/v1/migration/full/preview',handler((req,res)=>{
   const user=account(req);void user;
   const report=parseHistory(req.body?.bundle);
@@ -542,7 +601,7 @@ app.get('/api/v1/study/:id',handler((req,res)=>{
       revision++;emitChange(user.id,'updated','study',id);
     }
     const current=queue[session.position];
-    const card=current?query<CardRow & {note_type:string;fields_json:string|null;variant:string}>('SELECT c.*,n.type AS note_type,n.fields_json AS fields_json FROM cards c JOIN notes n ON n.id=c.note_id AND n.owner_id=c.owner_id WHERE c.id=? AND c.owner_id=? AND c.retired=0',current,user.id):undefined;
+    const card=current?query<CardRow & {variant:string;note_type:string;fields_json:string|null}>('SELECT c.*,n.type AS note_type,n.fields_json AS fields_json FROM cards c JOIN notes n ON n.id=c.note_id AND n.owner_id=c.owner_id WHERE c.id=? AND c.owner_id=? AND c.retired=0',current,user.id):undefined;
     return {session,queue,revision,card};
   });
   const card=result.card;
@@ -672,7 +731,7 @@ const dist=resolve(import.meta.dirname,'../dist');
 if (existsSync(dist)) {app.use(express.static(dist));app.get('/{*path}',(_req,res)=>res.sendFile(resolve(dist,'index.html')));}
 app.use((err:unknown,_req:Request,res:Response,_next:NextFunction)=>{
   const status=err instanceof ApiError?err.status:500;
-  if(err instanceof ContentError||err instanceof MediaError||err instanceof MigrationError){res.status(400).json({error:err.message});return;}
+  if(err instanceof ContentError||err instanceof MediaError||err instanceof MigrationError||err instanceof PortableError){res.status(400).json({error:err.message});return;}
   if(status===500)logger.error({name:err instanceof Error?err.name:'Error'},'request failed');
   res.status(status).json({error:status===500?'Unexpected server error':(err as Error).message});
 });
