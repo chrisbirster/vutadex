@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "inspect:legacy": "node --experimental-strip-types scripts/legacy-inspect.ts",
-    "export:legacy-history": "node --experimental-strip-types scripts/export-history.ts"
+    "export:legacy-history": "node --experimental-strip-types scripts/export-history.ts",
+    "dev:ui": "vite --host 127.0.0.1 --port 5173"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.131.0",

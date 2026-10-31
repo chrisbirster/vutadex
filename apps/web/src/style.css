@@ -27,3 +27,7 @@ h1,h2,h3{line-height:1.16;margin:0 0 12px;font-weight:850;letter-spacing:-.025em
 .difference-table pre{font-size:.73rem;white-space:pre-wrap;overflow-wrap:anywhere;max-height:150px;overflow-y:auto}
 .conflict{background:#fff6e6;border-color:#e8b96a}
 @media(max-width:600px){.difference-table{font-size:.7rem}.difference-table th,.difference-table td{padding:5px}}
+
+/* Keyboard and touch parity are test-gated in Chromium. */
+:focus-visible{outline:3px solid #145c77!important;outline-offset:3px}
+@media(hover:none){.nav-link,.button,button.primary,button.secondary,.type-button{min-height:44px}}
