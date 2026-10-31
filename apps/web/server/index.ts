@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
-import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex } from './study-policy.ts';
+import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex, accountDayKey } from './study-policy.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
 
@@ -243,7 +243,8 @@ app.get('/api/v1/overview',handler((req,res)=>{
   const due=query<{total:number}>('SELECT COUNT(*) AS total FROM cards WHERE owner_id=? AND retired=0 AND due_at<=?',user.id,t)?.total||0;
   const cards=query<{total:number}>('SELECT COUNT(*) AS total FROM cards WHERE owner_id=?',user.id)?.total||0;
   const reviews=list('SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON c.id=r.card_id JOIN decks d ON d.id=c.deck_id WHERE r.owner_id=? AND r.undone_at IS NULL ORDER BY r.created_at DESC LIMIT 200',user.id);
-  res.json({decks,due,cards,reviews});
+  const zone=query<{timezone:string}>('SELECT timezone FROM user_preferences WHERE user_id=?',user.id)?.timezone||'UTC';
+  res.json({decks,due,cards,timezone:zone,reviews:reviews.map((r:any)=>({...r,day:accountDayKey(r.created_at,zone)}))});
 }));
 app.get('/api/v1/decks',handler((req,res)=>{
   const user=account(req);res.json({decks:list('SELECT id,name,description,created_at FROM decks WHERE owner_id=? ORDER BY created_at DESC',user.id)});
@@ -498,8 +499,19 @@ app.post('/api/v1/study/:id/undo',handler((req,res)=>{
   res.json(result);
 }));
 app.get('/api/v1/stats',handler((req,res)=>{
-  const user=account(req);const reviewHistory=list<{rating:number;created_at:number;deck:string}>('SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON r.card_id=c.id JOIN decks d ON c.deck_id=d.id WHERE r.owner_id=? AND r.undone_at IS NULL ORDER BY r.created_at DESC LIMIT 5000',user.id);
-  res.json({reviews:reviewHistory});
+  const user=account(req);
+  const zone=query<{timezone:string}>('SELECT timezone FROM user_preferences WHERE user_id=?',user.id)?.timezone||'UTC';
+  const reviewHistory=list<{rating:number;created_at:number;deck:string}>(
+    'SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON r.card_id=c.id JOIN decks d ON c.deck_id=d.id WHERE r.owner_id=? AND r.undone_at IS NULL ORDER BY r.created_at DESC LIMIT 5000',user.id);
+  const today=now(),end=today+7*86400000;
+  const future=list<{due_at:number}>('SELECT due_at FROM cards WHERE owner_id=? AND retired=0 AND due_at>=? AND due_at<?',user.id,today,end);
+  const forecast:Record<string,number>={};
+  for(const card of future){
+    const day=accountDayKey(card.due_at,zone);
+    forecast[day]=(forecast[day]||0)+1;
+  }
+  res.json({timezone:zone,reviews:reviewHistory.map(r=>({...r,day:accountDayKey(r.created_at,zone)})),
+    forecast:Object.entries(forecast).sort(([a],[b])=>a.localeCompare(b)).map(([day,due])=>({day,due}))});
 }));
 app.use('/api',(_req,res)=>res.status(404).json({error:'Not found'}));
 const dist=resolve(import.meta.dirname,'../dist');
