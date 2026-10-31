@@ -19,7 +19,7 @@ const token = () => randomBytes(32).toString('base64url');
 const query = <T>(sql: string, ...args: (string | number | null)[]) => db.prepare(sql).get(...args) as T | undefined;
 const list = <T>(sql: string, ...args: (string | number | null)[]) => db.prepare(sql).all(...args) as T[];
 const run = (sql: string, ...args: (string | number | null)[]) => db.prepare(sql).run(...args);
-class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
+class ApiError extends Error { readonly status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 function required(value: unknown, name: string, max = 500): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) throw new ApiError(400, 'Invalid ' + name);
   return value.trim();

@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 const root = mkdtempSync(join(tmpdir(), 'vutadex-web-api-'));
 const origin = 'http://127.0.0.1:5173';
 let server: ChildProcess;
+let serverStderr = '';
 let base: string;
 
 async function availablePort():Promise<number> {
@@ -23,15 +24,16 @@ async function availablePort():Promise<number> {
 async function start(): Promise<void> {
   const port=await availablePort();base='http://127.0.0.1:'+port;
   server=spawn(process.execPath,['--experimental-strip-types',resolve(import.meta.dirname,'../server/index.ts')],{
-    cwd:resolve(import.meta.dirname,'..'),env:{...process.env,PORT:String(port),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),NODE_ENV:'test',LOG_LEVEL:'silent'},stdio:'ignore'
+    cwd:resolve(import.meta.dirname,'..'),env:{...process.env,PORT:String(port),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),NODE_ENV:'test',LOG_LEVEL:'silent'},stdio:['ignore','ignore','pipe']
   });
+  server.stderr?.on('data',(part:Buffer)=>{serverStderr += part.toString('utf8');});
   let error:unknown;
   for(let i=0;i<100;i++){
-    if(server.exitCode!==null)throw new Error('Server exited prematurely');
+    if(server.exitCode!==null)throw new Error('Server exited prematurely: '+serverStderr);
     try{const response=await fetch(base+'/api/v1/health');if(response.ok)return;}catch(e){error=e;}
     await new Promise(done=>setTimeout(done,50));
   }
-  throw new Error('API did not start: '+String(error));
+  throw new Error('API did not start: '+String(error)+' / '+serverStderr);
 }
 async function request(path:string,method='GET',body?:unknown,cookie?:string,withOrigin=true){
   return await fetch(base+'/api/v1'+path,{method,headers:{...(withOrigin?{Origin:origin}:{}),...(cookie?{Cookie:cookie}:{}),...(body!==undefined?{'content-type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)});
