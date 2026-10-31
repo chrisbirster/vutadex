@@ -8,8 +8,8 @@ import './style.css';
 type User = {id:string;email:string};
 type Deck = {id:string;name:string;description:string;created_at?:number;cards?:number;due?:number};
 type Note = {id:string;type:string;front:string;back:string;tags:string;created_at:number;revision:number};
-type Review = {rating:number;created_at:number;deck:string};
-type Overview = {decks:Deck[];due:number;cards:number;reviews:Review[]};
+type Review = {rating:number;created_at:number;deck:string;day?:string};
+type Overview = {decks:Deck[];due:number;cards:number;timezone:string;reviews:Review[]};
 type Study = {card:{id:string;front:string;back:string;due_at:number}|null;position:number;total:number;revision:number;waiting:number;paused:boolean;intervals:{rating:number;intervalMs:number;dueAt:number}[]};
 type SessionState = {user:User|null;loading:boolean;error:string};
 type SessionContextValue={session:SessionState;refresh:()=>Promise<void>};
@@ -147,7 +147,7 @@ function HomePage(){
   const navigate=useNavigate();
   if(loading)return <Loading/>;if(error)return <Notice text={error}/>;
   const overview=data!;
-  const streak=computeStreak(overview.reviews);
+  const streak=computeStreak(overview.reviews,overview.timezone);
   return <><section className="hero hero-main"><div><span className="eyebrow">THE KNOWLEDGE GOBLIN APPROACHES</span><h1>{overview.due?'Due cards are lurking.':'Your brain is ready.'}</h1><p>{overview.due?overview.due+' cards have been waiting for you.':'Create a deck and start collecting brain gains.'}</p><div className="actions"><button className="primary" onClick={()=>void startStudy(navigate)}><Play size={19} fill="currentColor"/> Study Now</button><Link className="button secondary" to="/cards/new" search={{deckId:undefined}}><Plus size={20}/> Add Chaos</Link></div></div><div className="hero-cat"><Bongo mood="hype" size="large"/><span className="sticker">BONGO<br/>BELIEVES<br/>IN YOU</span></div></section>
     <div className="home-grid"><section><div className="section-heading"><h2>Your Decks</h2><Link to="/decks" className="text-link">See all <ArrowRight size={15}/></Link></div>
     {overview.decks.length?<div className="deck-grid">{overview.decks.slice(0,6).map((deck,i)=><DeckCard key={deck.id} deck={deck} index={i}/>)}</div>:<Empty title="No decks. Yet." message="Even Bongo had to start with one flashcard." action={<Link to="/decks/new" className="button primary">Create your first deck</Link>}/>}
@@ -255,9 +255,85 @@ function StudySessionPage(){const {sessionId}=routeStudySession.useParams();cons
       {canUndo&&<button className="secondary" disabled={busy} onClick={()=>void updateSession('undo')}><RotateCcw size={17}/> Undo Last Rating</button>}
     </div><div className="study-layout"><div><div className="progress-label">Card {data.position+1} of {data.total}<span>{Math.round(data.position/Math.max(1,data.total)*100)}%</span></div><div className="progress"><div style={{width:String(data.position/Math.max(1,data.total)*100)+'%'}}/></div><div className="study-card card"><small className="pill">Question</small><h2>{data.card.front}</h2>{revealed&&<div className="answer"><span className="eyebrow">THE REVEAL</span><p>{data.card.back}</p></div>}</div>{data.paused?<div className="waiting"><Clock/> Session paused. Resume to continue.</div>:data.waiting>0?<div className="waiting"><Clock/> This card returns in about {Math.ceil(data.waiting/1000)} seconds. <button className="secondary" onClick={reload}>Check again</button></div>:!revealed?<button className="primary reveal" onClick={()=>setRevealed(true)}><Eye/> Show Answer <kbd>Space</kbd></button>:<div className="rating-grid">{([{name:'Again',key:1,subtitle:'Forgot it',tone:'peach'},{name:'Hard',key:2,subtitle:'Still fuzzy',tone:'cream'},{name:'Good',key:3,subtitle:'Mostly got it',tone:'mint'},{name:'Easy',key:4,subtitle:'Knew it well',tone:'blue'}] as const).map(r=><button disabled={busy} key={r.key} className={'rating rating-'+r.tone} onClick={()=>void rate(r.key)}><Bongo mood={r.key===1?'sleepy':r.key===2?'thinking':r.key===4?'hype':'happy'}/><strong>{r.name}</strong><kbd>{r.key}</kbd><small>{r.subtitle} · {data.intervals.find(x=>x.rating===r.key)?humanInterval(data.intervals.find(x=>x.rating===r.key)!.intervalMs):'—'}</small></button>)}</div>}<Notice text={message}/></div><aside className="study-aside"><div className="card"><h3>Session Progress</h3><Tile icon={Layers3} value={data.total-data.position} label="Remaining" tone="mint"/><Tile icon={Check} value={data.position} label="Reviewed" tone="cream"/></div><div className="mascot-note"><Bongo mood="happy"/><p>FOCUS MODE: BONGO BELIEVES IN YOU.</p></div></aside></div></>;
 }
-function StatsPage(){const {data,loading,error}=useResource<{reviews:Review[]}>('/stats');if(loading)return <Loading/>;if(error)return <Notice text={error}/>;const reviews=data?.reviews||[];const counts=new Map<string,number>();for(const r of reviews){const d=new Date(r.created_at).toLocaleDateString('en-CA');counts.set(d,(counts.get(d)||0)+1);}const days=Array.from({length:84},(_,i)=>{const d=new Date();d.setDate(d.getDate()-83+i);return {label:d.toLocaleDateString('en-CA'),count:counts.get(d.toLocaleDateString('en-CA'))||0};});const daysWithReviews=new Set(reviews.map(r=>new Date(r.created_at).toLocaleDateString('en-CA'))).size;const recalled=reviews.filter(r=>r.rating!==1).length;return <><Heading title="Your Brain's Progress" subtitle="Small steps add up. Bongo is keeping score." mood="hype"/><div className="metrics-row"><Tile icon={BookOpen} value={reviews.length} label="Recent reviews" tone="mint"/><Tile icon={Flame} value={computeStreak(reviews)} label="Day streak" tone="cream"/><Tile icon={Target} value={reviews.length?Math.round(recalled/reviews.length*100)+'%':'—'} label="Non-Again ratings" tone="blue"/><Tile icon={Clock} value={daysWithReviews} label="Active study days" tone="peach"/></div><div className="stats-grid"><section className="card"><h3>Review Heatmap</h3><p className="muted">The last 12 weeks. Darker squares mean more reviews.</p><div className="heatmap" role="img" aria-label="Daily review activity over the past 12 weeks">{days.map(d=><span key={d.label} title={d.label+': '+d.count+' reviews'} className={'heat heat-'+(d.count===0?0:d.count<3?1:d.count<8?2:3)}/>)}</div><p className="muted">No reviews · 1–2 · 3–7 · 8+ reviews</p></section><section className="card"><h3>Rating Breakdown</h3><p className="muted">Actual self-ratings from your last {reviews.length} reviews; not an estimated retention score.</p>{['Again','Hard','Good','Easy'].map((name,i)=>{const count=reviews.filter(r=>r.rating===i+1).length;return <div className="breakdown" key={name}><span>{name}</span><div className="progress"><div style={{width:reviews.length?count/reviews.length*100+'%':'0%'}}/></div><strong>{count}</strong></div>;})}</section><section className="card"><h3>Reviews by Deck</h3>{Array.from(reviews.reduce((map,r)=>map.set(r.deck,(map.get(r.deck)||0)+1),new Map<string,number>())).map(([deck,count])=><div className="breakdown" key={deck}><span>{deck}</span><strong>{count}</strong></div>)}{!reviews.length&&<p className="muted">Start reviewing to see real data here.</p>}</section><section className="mascot-note"><Bongo mood="sleepy"/><p>THE FORGETTING CURVE FEARS YOU (eventually).</p></section></div></>;}
-function computeStreak(reviews:Review[]):number{const days=new Set(reviews.map(r=>new Date(r.created_at).toLocaleDateString('en-CA')));let streak=0;const d=new Date();if(!days.has(d.toLocaleDateString('en-CA')))d.setDate(d.getDate()-1);while(days.has(d.toLocaleDateString('en-CA'))){streak++;d.setDate(d.getDate()-1);}return streak;}
-function SettingsPage(){const {session,refresh}=useSession();const navigate=useNavigate();const {data,reload}=useResource<{sessions:{id:string;created_at:number;last_seen:number}[]}>('/sessions');const [error,setError]=useState('');async function signOutAll(){if(!window.confirm('Sign out from every device?'))return;try{await api('/sessions/revoke-all',{method:'POST'});await refresh();void navigate({to:'/login'});}catch(e){setError(String(e));reload();}}return <><Heading title="Settings" subtitle="Your cards, your account, your rules."/><div className="card form-card"><h2>Account</h2><p>Signed in as <strong>{session.user?.email}</strong></p><p className="muted">Saved decks and reviews belong to this account.</p><h3>Sessions</h3>{data?.sessions.map(s=><p key={s.id}>Device session · last used {new Date(s.last_seen).toLocaleString()}</p>)}<button className="danger" onClick={()=>void signOutAll()}>Sign out all devices</button><Notice text={error}/></div></>;}
+
+function accountDate(instant:number,timezone:string):string{
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(instant));
+  const get=(name:string)=>parts.find(p=>p.type===name)!.value;
+  return get('year')+'-'+get('month')+'-'+get('day');
+}
+function computeStreak(reviews:Review[],timezone='UTC'):number{
+  const days=new Set(reviews.map(r=>r.day||accountDate(r.created_at,timezone)));
+  let date=Date.parse(accountDate(Date.now(),timezone)+'T00:00:00Z'),streak=0;
+  if(!days.has(new Date(date).toISOString().slice(0,10)))date-=86400000;
+  while(days.has(new Date(date).toISOString().slice(0,10))){streak++;date-=86400000;}
+  return streak;
+}
+function StatsPage(){
+  const {data,loading,error}=useResource<{timezone:string;reviews:Review[];forecast:{day:string;due:number}[]}>('/stats');
+  if(loading)return <Loading/>;if(error)return <Notice text={error}/>;
+  const reviews=data?.reviews||[],zone=data?.timezone||'UTC',forecast=data?.forecast||[];
+  const counts=new Map<string,number>();
+  for(const r of reviews){const key=r.day||accountDate(r.created_at,zone);counts.set(key,(counts.get(key)||0)+1);}
+  const dayStart=Date.parse(accountDate(Date.now(),zone)+'T00:00:00Z');
+  const days=Array.from({length:84},(_,i)=>{const label=new Date(dayStart-(83-i)*86400000).toISOString().slice(0,10);return {label,count:counts.get(label)||0};});
+  const recalled=reviews.filter(r=>r.rating!==1).length;
+  return <><Heading title="Your Brain's Progress" subtitle="Real reviews. Account-timezone charts. Absolutely no imaginary brain gains." mood="hype"/>
+    <p className="muted">Displayed in {zone}. Self-ratings are not a measured retention probability.</p>
+    <div className="metrics-row">
+      <Tile icon={BookOpen} value={reviews.length} label="Recent reviews" tone="mint"/>
+      <Tile icon={Flame} value={computeStreak(reviews,zone)} label="Day streak" tone="cream"/>
+      <Tile icon={Target} value={reviews.length?Math.round(recalled/reviews.length*100)+'%':'—'} label="Non-Again ratings" tone="blue"/>
+      <Tile icon={Clock} value={counts.size} label="Active study days" tone="peach"/>
+    </div>
+    <div className="stats-grid">
+      <section className="card"><h3>Review Heatmap</h3><p className="muted">Your last 12 weeks, in {zone}.</p>
+        <div className="heatmap" role="img" aria-label="Daily review count for 12 weeks">{days.map(d=><span key={d.label} title={d.label+': '+d.count+' reviews'} className={'heat heat-'+(d.count===0?0:d.count<3?1:d.count<8?2:3)}/>)}</div>
+        <p className="muted">No reviews · 1–2 · 3–7 · 8+ reviews</p>
+      </section>
+      <section className="card"><h3>Rating Breakdown</h3><p className="muted">Recent self-ratings, excluding undone reviews. Not a mature-review retention metric.</p>
+        {['Again','Hard','Good','Easy'].map((name,i)=>{const count=reviews.filter(r=>r.rating===i+1).length;return <div className="breakdown" key={name}><span>{name}</span><div className="progress"><div style={{width:reviews.length?count/reviews.length*100+'%':'0%'}}/></div><strong>{count}</strong></div>;})}
+      </section>
+      <section className="card"><h3>Due Forecast · Next 7 Days</h3><p className="muted">Currently scheduled future cards; counts may change after reviews.</p>
+        {forecast.map(row=><div key={row.day} className="breakdown"><span>{row.day}</span><strong>{row.due} due</strong></div>)}
+        {!forecast.length&&<p className="muted">No future cards scheduled in this window.</p>}
+      </section>
+      <section className="card"><h3>Reviews by Deck</h3>
+        {Array.from(reviews.reduce((map,r)=>map.set(r.deck,(map.get(r.deck)||0)+1),new Map<string,number>())).map(([deck,count])=><div className="breakdown" key={deck}><span>{deck}</span><strong>{count}</strong></div>)}
+        {!reviews.length&&<p className="muted">Study a card to start tracking progress.</p>}
+      </section>
+    </div></>;
+}
+function SettingsPage(){
+  const {session,refresh}=useSession(),navigate=useNavigate();
+  const {data:devices,reload:reloadDevices}=useResource<{sessions:{id:string;created_at:number;last_seen:number}[]}>('/sessions');
+  const {data:preferences,reload:reloadPreferences}=useResource<{timezone:string}>('/preferences');
+  const [timezone,setTimezone]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('');
+  useEffect(()=>{if(preferences?.timezone&&!timezone)setTimezone(preferences.timezone);},[preferences,timezone]);
+  async function saveTimezone(e:React.FormEvent){e.preventDefault();setError('');setMessage('');
+    try{await api('/preferences',{method:'PUT',body:{timezone}});setMessage('Timezone saved. Daily review boundaries will now follow '+timezone+'.');reloadPreferences();}
+    catch(e){setError(String(e));}
+  }
+  async function signOutAll(){if(!window.confirm('Sign out from every device?'))return;try{await api('/sessions/revoke-all',{method:'POST'});await refresh();void navigate({to:'/login'});}catch(e){setError(String(e));reloadDevices();}}
+  async function revoke(id:string){setError('');try{await api('/sessions/revoke',{method:'POST',body:{id}});reloadDevices();await refresh();}catch(e){setError(String(e));}}
+  return <><Heading title="Settings" subtitle="Your cards, your account, your rules."/>
+    <div className="card form-card">
+      <h2>Account</h2><p>Signed in as <strong>{session.user?.email}</strong></p>
+      <p className="muted">All decks and reviews belong to your verified account.</p>
+      <form onSubmit={e=>void saveTimezone(e)}>
+        <label>Study timezone (IANA name)<input required value={timezone} onChange={e=>setTimezone(e.target.value)} placeholder="America/New_York"/></label>
+        <p className="muted">Timezone controls daily streaks and sibling separation across daylight-saving transitions.</p>
+        <button className="primary">Save Timezone</button>
+      </form>
+      {message&&<div className="success" role="status">{message}</div>}
+      <h3>Device Sessions</h3>
+      {devices?.sessions.map(d=><div className="breakdown" key={d.id}>
+        <span>Last used {new Date(d.last_seen).toLocaleString()}</span>
+        <button className="secondary" onClick={()=>void revoke(d.id)}>Revoke</button>
+      </div>)}
+      <div className="actions"><button className="danger" onClick={()=>void signOutAll()}>Sign out all devices</button></div>
+      <Notice text={error}/>
+    </div></>;
+}
 function LoginPage(){const [email,setEmail]=useState('');const [sent,setSent]=useState(false);const [error,setError]=useState('');const [busy,setBusy]=useState(false);const [devLink,setDevLink]=useState('');async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{await api('/auth/magic-links',{method:'POST',body:{email}});setSent(true);try{const local=await api<{email:string;link:string}[]>('/dev/inbox');setDevLink(local.filter(x=>x.email===email.trim().toLowerCase()).at(-1)?.link||'');}catch{/* Production does not expose an inbox. */}}catch(e){setError(String(e));}finally{setBusy(false);}}return <div className="auth-card card"><Bongo size="large" mood="hype"/><h1>Welcome to Vutadex.</h1><p>Small cards. Big brain energy.</p>{sent?<><div className="success" role="status">If that email can receive messages, your sign-in link is on its way.</div>{devLink&&<a href={devLink} className="button primary">Open local dev sign-in link</a>}<button onClick={()=>setSent(false)} className="secondary">Try another email</button></>:<form onSubmit={e=>void submit(e)}><label>Email address<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></label><button disabled={busy} className="primary"><Mail size={19}/>{busy?'Sending...':'Send magic link'}</button></form>}<Notice text={error}/><small>Sign in on desktop and phone with the same email to use your saved collection.</small></div>;}
 function VerifyPage(){const {refresh}=useSession();const navigate=useNavigate();const [secret]=useState(()=>{const params=new URLSearchParams(window.location.hash.slice(1));const t=params.get('token')||'';window.history.replaceState(null,'',window.location.pathname);return t;});const [busy,setBusy]=useState(false);const [error,setError]=useState('');async function confirm(){setBusy(true);try{await api('/auth/magic-links/consume',{method:'POST',body:{token:secret}});await refresh();void navigate({to:'/'});}catch(e){setError(String(e));}finally{setBusy(false);}}return <div className="auth-card card"><Bongo mood="thinking"/><h1>Confirm sign-in</h1><p>Ready to let Bongo into your brain?</p>{secret?<button className="primary" disabled={busy} onClick={()=>void confirm()}>{busy?'Confirming...':'Confirm sign-in'}</button>:<p className="notice">This link is missing its token.</p>}<Notice text={error}/><Link to="/login" className="text-link">Request another link</Link></div>;}
 function Loading(){return <div className="loading" role="status"><LoaderCircle className="spin"/> Bongo is retrieving your cards...</div>;}

@@ -35,3 +35,5 @@ export function pickReadyIndex(queue:readonly string[],position:number,due:Reado
   for(let i=position;i<queue.length;i++)if((due.get(queue[i]!)??Infinity)<=instant)return i;
   return -1;
 }
+
+export function accountDayKey(instant:number,timezone:string):string { return dateParts(instant,timezone); }

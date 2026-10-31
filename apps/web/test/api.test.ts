@@ -284,3 +284,25 @@ test('M6 drafts persist across devices with optimistic revision conflicts and ow
   const feed=await (await request('/changes?since=0','GET',undefined,two.cookie)).json() as {changes:{resource:string;kind:string}[]};
   assert.ok(feed.changes.some(e=>e.resource==='draft'&&e.kind==='deleted'));
 });
+
+test('M7 statistics follow stored account timezone and exclude undone events',async()=>{
+  const user=await session('m7-stats@example.com');
+  const set=await request('/preferences','PUT',{timezone:'America/New_York'},user.cookie);
+  assert.equal(set.status,200);
+  const deckId=(await (await request('/decks','POST',{name:'M7 Stats'},user.cookie)).json() as {deck:{id:string}}).deck.id;
+  await request('/notes','POST',{deckId,type:'basic',front:'Why study?',back:'Remember',tags:''},user.cookie);
+  const studyId=(await (await request('/study','POST',{deckId},user.cookie)).json() as {id:string}).id;
+  const card=(await (await request('/study/'+studyId,'GET',undefined,user.cookie)).json()) as {revision:number};
+  const op=crypto.randomUUID();
+  assert.equal((await request('/study/'+studyId+'/rate','POST',{rating:3,revision:card.revision,operationId:op},user.cookie)).status,200);
+  const stats=await (await request('/stats','GET',undefined,user.cookie)).json() as {timezone:string;reviews:{day:string}[];forecast:{day:string;due:number}[]};
+  assert.equal(stats.timezone,'America/New_York');
+  assert.equal(stats.reviews.length,1);
+  assert.match(stats.reviews[0]!.day,/^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(Array.isArray(stats.forecast));
+  const overview=await (await request('/overview','GET',undefined,user.cookie)).json() as {timezone:string};
+  assert.equal(overview.timezone,'America/New_York');
+  assert.equal((await request('/study/'+studyId+'/undo','POST',{revision:card.revision+1},user.cookie)).status,200);
+  const updated=await (await request('/stats','GET',undefined,user.cookie)).json() as {reviews:unknown[]};
+  assert.equal(updated.reviews.length,0);
+});
