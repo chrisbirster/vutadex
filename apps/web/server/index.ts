@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
+import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex } from './study-policy.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
 
@@ -140,9 +141,9 @@ app.post('/api/v1/sessions/revoke-all',handler((req,res)=>{
 app.get('/api/v1/overview',handler((req,res)=>{
   const user=account(req);const t=now();
   const decks=list('SELECT d.id,d.name,d.description,COUNT(c.id) AS cards,COALESCE(SUM(CASE WHEN c.due_at<=? THEN 1 ELSE 0 END),0) AS due FROM decks d LEFT JOIN cards c ON c.deck_id=d.id AND c.owner_id=d.owner_id WHERE d.owner_id=? GROUP BY d.id ORDER BY d.created_at DESC',t,user.id);
-  const due=query<{total:number}>('SELECT COUNT(*) AS total FROM cards WHERE owner_id=? AND due_at<=?',user.id,t)?.total||0;
+  const due=query<{total:number}>('SELECT COUNT(*) AS total FROM cards WHERE owner_id=? AND retired=0 AND due_at<=?',user.id,t)?.total||0;
   const cards=query<{total:number}>('SELECT COUNT(*) AS total FROM cards WHERE owner_id=?',user.id)?.total||0;
-  const reviews=list('SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON c.id=r.card_id JOIN decks d ON d.id=c.deck_id WHERE r.owner_id=? ORDER BY r.created_at DESC LIMIT 200',user.id);
+  const reviews=list('SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON c.id=r.card_id JOIN decks d ON d.id=c.deck_id WHERE r.owner_id=? AND r.undone_at IS NULL ORDER BY r.created_at DESC LIMIT 200',user.id);
   res.json({decks,due,cards,reviews});
 }));
 app.get('/api/v1/decks',handler((req,res)=>{
@@ -244,53 +245,154 @@ app.get('/api/v1/decks/:id/export',handler((req,res)=>{
   res.setHeader('content-disposition','attachment; filename="vutadex.deck"');
   res.send(serializeDeckFile({name:deck.name,notes}));
 }));
+
+app.get('/api/v1/preferences',handler((req,res)=>{
+  const user=account(req);
+  const pref=query<{timezone:string}>('SELECT timezone FROM user_preferences WHERE user_id=?',user.id);
+  res.json({timezone:pref?.timezone||'UTC'});
+}));
+app.put('/api/v1/preferences',handler((req,res)=>{
+  const user=account(req),zone=required(req.body?.timezone,'timezone',120);
+  if(!validTimezone(zone))throw new ApiError(400,'Unknown IANA timezone');
+  run('INSERT INTO user_preferences(user_id,timezone) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone',user.id,zone);
+  res.json({timezone:zone});
+}));
+type ScheduledCard={id:string;note_id:string;review_count:number;due_at:number};
+type SessionRow={queue_json:string;position:number;revision:number;status:string};
+type CardRow={id:string;front:string;back:string;due_at:number;stability:number|null;difficulty:number|null;fast_stability:number|null;last_review_at:number|null;review_count:number};
+function currentState(card:CardRow):MemoryState|null{
+  return card.stability===null||card.difficulty===null||card.fast_stability===null?
+    null:{stability:card.stability,difficulty:card.difficulty,fastStability:card.fast_stability};
+}
 app.post('/api/v1/study',handler((req,res)=>{
-  const user=account(req); const deckId=req.body?.deckId;
-  if(deckId!==undefined && (typeof deckId!=='string'||!query('SELECT id FROM decks WHERE id=? AND owner_id=?',deckId,user.id)))throw new ApiError(404,'Deck not found');
-  const rows=list<{id:string}>('SELECT id FROM cards WHERE owner_id=? AND due_at<=?'+(deckId?' AND deck_id=?':'')+' ORDER BY review_count DESC,due_at ASC LIMIT 100',...(deckId?[user.id,now(),deckId]:[user.id,now()]));
+  const user=account(req),deckId=req.body?.deckId;
+  if(deckId!==undefined && (typeof deckId!=='string'||!query('SELECT id FROM decks WHERE id=? AND owner_id=?',deckId,user.id)))
+    throw new ApiError(404,'Deck not found');
+  const zone=query<{timezone:string}>('SELECT timezone FROM user_preferences WHERE user_id=?',user.id)?.timezone||'UTC';
+  const start=localDayStart(now(),zone);
+  const reviewed=list<{note_id:string}>(
+    'SELECT DISTINCT c.note_id FROM review_events r JOIN cards c ON c.id=r.card_id WHERE r.owner_id=? AND r.created_at>=? AND r.undone_at IS NULL',
+    user.id,start
+  );
+  const suppressed=new Set(reviewed.map(r=>r.note_id));
+  const candidates=list<ScheduledCard>(
+    'SELECT id,note_id,review_count,due_at FROM cards WHERE owner_id=? AND retired=0 AND due_at<=?'+(deckId?' AND deck_id=?':'')+
+    ' ORDER BY CASE WHEN review_count>0 THEN 0 ELSE 1 END, due_at ASC LIMIT 1000',
+    ...(deckId?[user.id,now(),deckId]:[user.id,now()])
+  );
+  const seen=new Set<string>(),queue:string[]=[];
+  for(const c of candidates){
+    if(seen.has(c.note_id)||suppressed.has(c.note_id))continue;
+    seen.add(c.note_id);queue.push(c.id);
+    if(queue.length>=100)break;
+  }
   const id=randomUUID();
-  run('INSERT INTO study_sessions(id,owner_id,queue_json,created_at) VALUES(?,?,?,?)',id,user.id,JSON.stringify(rows.map(r=>r.id)),now());
-  res.status(201).json({id});
+  run('INSERT INTO study_sessions(id,owner_id,queue_json,created_at) VALUES(?,?,?,?)',id,user.id,JSON.stringify(queue),now());
+  res.status(201).json({id,total:queue.length});
 }));
 app.get('/api/v1/study/:id',handler((req,res)=>{
-  const user=account(req);
-  const s=query<{queue_json:string;position:number;revision:number}>('SELECT queue_json,position,revision FROM study_sessions WHERE id=? AND owner_id=?',String(req.params.id),user.id);
-  if(!s)throw new ApiError(404,'Study session not found');
-  const queue=JSON.parse(s.queue_json) as string[];
-  const cardId=queue[s.position];
-  const card=cardId?query<{id:string;front:string;back:string;due_at:number}>('SELECT id,front,back,due_at FROM cards WHERE id=? AND owner_id=?',cardId,user.id):null;
-  res.json({card:card||null,position:s.position,total:queue.length,revision:s.revision,waiting:card?Math.max(0,card.due_at-now()):0});
+  const user=account(req),id=String(req.params.id);
+  const result=transaction(()=>{
+    const session=query<SessionRow>('SELECT queue_json,position,revision,status FROM study_sessions WHERE id=? AND owner_id=?',id,user.id);
+    if(!session)throw new ApiError(404,'Study session not found');
+    const queue=JSON.parse(session.queue_json) as string[];
+    let revision=session.revision;
+    // Do not let a waiting Again retry block later ready cards.
+    const remaining=queue.slice(session.position);
+    const rows=remaining.length?list<{id:string;due_at:number}>(
+      'SELECT id,due_at FROM cards WHERE owner_id=? AND id IN ('+remaining.map(()=>'?').join(',')+')',
+      user.id,...remaining
+    ):[];
+    const due=new Map(rows.map(c=>[c.id,c.due_at]));
+    const next=pickReadyIndex(queue,session.position,due,now());
+    if(next>session.position&&session.status==='active'){
+      const first=queue[session.position]!,ready=queue[next]!;
+      queue[session.position]=ready;queue[next]=first;
+      run('UPDATE study_sessions SET queue_json=?,revision=revision+1 WHERE id=? AND owner_id=?',JSON.stringify(queue),id,user.id);
+      revision++;
+    }
+    const current=queue[session.position];
+    const card=current?query<CardRow>('SELECT * FROM cards WHERE id=? AND owner_id=? AND retired=0',current,user.id):undefined;
+    return {session,queue,revision,card};
+  });
+  const card=result.card;
+  res.json({card:card?{id:card.id,front:card.front,back:card.back,due_at:card.due_at}:null,
+    position:result.session.position,total:result.queue.length,revision:result.revision,paused:result.session.status==='paused',
+    waiting:card?Math.max(0,card.due_at-now()):0,
+    intervals:card?intervalPreviews(currentState(card),card.last_review_at,now()):[]});
+}));
+app.post('/api/v1/study/:id/pause',handler((req,res)=>{
+  const user=account(req),revision=Number(req.body?.revision);
+  if(!Number.isSafeInteger(revision))throw new ApiError(400,'Invalid revision');
+  const changed=run("UPDATE study_sessions SET status='paused',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
+    String(req.params.id),user.id,revision);
+  if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+  res.json({revision:revision+1,paused:true});
+}));
+app.post('/api/v1/study/:id/resume',handler((req,res)=>{
+  const user=account(req),revision=Number(req.body?.revision);
+  if(!Number.isSafeInteger(revision))throw new ApiError(400,'Invalid revision');
+  const changed=run("UPDATE study_sessions SET status='active',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
+    String(req.params.id),user.id,revision);
+  if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+  res.json({revision:revision+1,paused:false});
 }));
 app.post('/api/v1/study/:id/rate',handler((req,res)=>{
-  const user=account(req),rating=Number(req.body?.rating);
+  const user=account(req),rating=Number(req.body?.rating),id=String(req.params.id);
   if(![1,2,3,4].includes(rating))throw new ApiError(400,'Invalid rating');
-  const operationId=required(req.body?.operationId,'operation ID',80);
-  const expected=Number(req.body?.revision);
+  const operationId=required(req.body?.operationId,'operation ID',80),expected=Number(req.body?.revision);
   if(!Number.isSafeInteger(expected)||expected<0)throw new ApiError(400,'Invalid revision');
   const result=transaction(()=>{
-    // A repeated operation never double-applies a review.
     if(query('SELECT id FROM review_events WHERE id=? AND owner_id=?',operationId,user.id))return {duplicate:true};
-    const s=query<{queue_json:string;position:number;revision:number}>('SELECT queue_json,position,revision FROM study_sessions WHERE id=? AND owner_id=?',String(req.params.id),user.id);
-    if(!s)throw new ApiError(404,'Study session not found');
-    if(s.revision!==expected)throw new ApiError(409,'Session changed elsewhere. Refresh to resume.');
-    const queue=JSON.parse(s.queue_json) as string[],id=queue[s.position];
-    if(!id)throw new ApiError(409,'Session already complete');
-    const card=query<{id:string;stability:number|null;difficulty:number|null;fast_stability:number|null;last_review_at:number|null;review_count:number;due_at:number}>('SELECT * FROM cards WHERE id=? AND owner_id=?',id,user.id);
+    const session=query<SessionRow>('SELECT queue_json,position,revision,status FROM study_sessions WHERE id=? AND owner_id=?',id,user.id);
+    if(!session)throw new ApiError(404,'Study session not found');
+    if(session.revision!==expected)throw new ApiError(409,'Session changed elsewhere. Refresh to resume.');
+    if(session.status!=='active')throw new ApiError(409,'Resume before rating');
+    const queue=JSON.parse(session.queue_json) as string[],cardId=queue[session.position];
+    if(!cardId)throw new ApiError(409,'Session already complete');
+    const card=query<CardRow>('SELECT * FROM cards WHERE id=? AND owner_id=? AND retired=0',cardId,user.id);
     if(!card)throw new ApiError(404,'Card not found');
-    if(card.due_at>now())throw new ApiError(409,'Card is not ready yet');
-    const before:MemoryState|null=card.stability===null||card.difficulty===null||card.fast_stability===null?null:{stability:card.stability,difficulty:card.difficulty,fastStability:card.fast_stability};
-    const state=nextMemoryState(before,card.last_review_at===null?0:(now()-card.last_review_at)/86400000,rating as Rating);
-    const interval=rating===1?60000:Math.max(60000,Math.round(nextIntervalDays(state)*86400000));
-    const time=now();
-    run('UPDATE cards SET stability=?,difficulty=?,fast_stability=?,last_review_at=?,review_count=review_count+1,due_at=? WHERE id=? AND owner_id=?',state.stability,state.difficulty,state.fastStability,time,time+interval,id,user.id);
-    run('INSERT INTO review_events(id,owner_id,card_id,rating,created_at) VALUES(?,?,?,?,?)',operationId,user.id,id,rating,time);
-    if(rating===1)queue.push(id);
-    run('UPDATE study_sessions SET queue_json=?,position=position+1,revision=revision+1 WHERE id=? AND owner_id=?',JSON.stringify(queue),String(req.params.id),user.id);
-    return {duplicate:false,intervalMs:interval,scheduler:FSRS_VERSION};
-  });res.json(result);
+    const time=now();if(card.due_at>time)throw new ApiError(409,'Card is not ready yet');
+    const before=JSON.stringify({stability:card.stability,difficulty:card.difficulty,fast_stability:card.fast_stability,last_review_at:card.last_review_at,review_count:card.review_count,due_at:card.due_at});
+    const {state,intervalMs}=intervalForRating(currentState(card),card.last_review_at,rating as Rating,time);
+    run('UPDATE cards SET stability=?,difficulty=?,fast_stability=?,last_review_at=?,review_count=review_count+1,due_at=? WHERE id=? AND owner_id=?',
+      state.stability,state.difficulty,state.fastStability,time,time+intervalMs,cardId,user.id);
+    run('INSERT INTO review_events(id,owner_id,card_id,rating,created_at) VALUES(?,?,?,?,?)',operationId,user.id,cardId,rating,time);
+    run('INSERT INTO review_undo(event_id,owner_id,session_id,card_id,before_json,queue_json,position,after_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+      operationId,user.id,id,cardId,before,session.queue_json,session.position,session.revision+1,time);
+    if(rating===1)queue.push(cardId);
+    run('UPDATE study_sessions SET queue_json=?,position=position+1,revision=revision+1 WHERE id=? AND owner_id=?',
+      JSON.stringify(queue),id,user.id);
+    return {duplicate:false,intervalMs,scheduler:FSRS_VERSION,revision:session.revision+1};
+  });
+  res.json(result);
+}));
+app.post('/api/v1/study/:id/undo',handler((req,res)=>{
+  const user=account(req),id=String(req.params.id),expected=Number(req.body?.revision);
+  if(!Number.isSafeInteger(expected)||expected<0)throw new ApiError(400,'Invalid revision');
+  const result=transaction(()=>{
+    const session=query<SessionRow>('SELECT * FROM study_sessions WHERE id=? AND owner_id=?',id,user.id);
+    if(!session)throw new ApiError(404,'Study session not found');
+    if(session.revision!==expected)throw new ApiError(409,'Session changed elsewhere');
+    const entry=query<{event_id:string;card_id:string;before_json:string;queue_json:string;position:number;after_revision:number;created_at:number}>(
+      'SELECT * FROM review_undo WHERE owner_id=? AND session_id=? AND undone_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',user.id,id);
+    if(!entry)throw new ApiError(409,'No review available to undo');
+    if(entry.after_revision!==session.revision)throw new ApiError(409,'Only the most recent action can be undone');
+    const later=query<{id:string}>('SELECT id FROM review_events WHERE owner_id=? AND card_id=? AND undone_at IS NULL AND created_at>? LIMIT 1',user.id,entry.card_id,entry.created_at);
+    if(later)throw new ApiError(409,'Card was reviewed on another device');
+    const before=JSON.parse(entry.before_json) as {stability:number|null;difficulty:number|null;fast_stability:number|null;last_review_at:number|null;review_count:number;due_at:number};
+    run('UPDATE cards SET stability=?,difficulty=?,fast_stability=?,last_review_at=?,review_count=?,due_at=? WHERE id=? AND owner_id=?',
+      before.stability,before.difficulty,before.fast_stability,before.last_review_at,before.review_count,before.due_at,entry.card_id,user.id);
+    run('UPDATE review_events SET undone_at=? WHERE id=? AND owner_id=?',now(),entry.event_id,user.id);
+    run('UPDATE review_undo SET undone_at=? WHERE event_id=? AND owner_id=?',now(),entry.event_id,user.id);
+    run('UPDATE study_sessions SET queue_json=?,position=?,revision=revision+1 WHERE id=? AND owner_id=?',
+      entry.queue_json,entry.position,id,user.id);
+    return {revision:session.revision+1,undone:true};
+  });
+  res.json(result);
 }));
 app.get('/api/v1/stats',handler((req,res)=>{
-  const user=account(req);const reviewHistory=list<{rating:number;created_at:number;deck:string}>('SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON r.card_id=c.id JOIN decks d ON c.deck_id=d.id WHERE r.owner_id=? ORDER BY r.created_at DESC LIMIT 5000',user.id);
+  const user=account(req);const reviewHistory=list<{rating:number;created_at:number;deck:string}>('SELECT r.rating,r.created_at,d.name AS deck FROM review_events r JOIN cards c ON r.card_id=c.id JOIN decks d ON c.deck_id=d.id WHERE r.owner_id=? AND r.undone_at IS NULL ORDER BY r.created_at DESC LIMIT 5000',user.id);
   res.json({reviews:reviewHistory});
 }));
 app.use('/api',(_req,res)=>res.status(404).json({error:'Not found'}));

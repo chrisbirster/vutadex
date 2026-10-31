@@ -27,9 +27,17 @@ export function transaction<T>(work: () => T): T {
 db.exec("CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);");
 db.exec("CREATE INDEX IF NOT EXISTS challenges_email ON challenges(email,expires_at);");
 
-function addColumn(table:'notes'|'cards',name:string,declaration:string):void{
+function addColumn(table:'notes'|'cards'|'review_events'|'study_sessions',name:string,declaration:string):void{
   const cols=db.prepare('PRAGMA table_info('+table+')').all() as {name:string}[];
   if(!cols.some(c=>c.name===name))db.exec('ALTER TABLE '+table+' ADD COLUMN '+declaration);
 }
 addColumn('notes','revision','revision INTEGER NOT NULL DEFAULT 0');
 addColumn('cards','retired','retired INTEGER NOT NULL DEFAULT 0');
+
+addColumn('review_events','undone_at','undone_at INTEGER');
+addColumn('study_sessions','status',"status TEXT NOT NULL DEFAULT 'active'");
+db.exec(
+  "CREATE TABLE IF NOT EXISTS user_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, timezone TEXT NOT NULL DEFAULT 'UTC');"+
+  "CREATE TABLE IF NOT EXISTS review_undo (event_id TEXT PRIMARY KEY REFERENCES review_events(id), owner_id TEXT NOT NULL REFERENCES users(id), session_id TEXT NOT NULL REFERENCES study_sessions(id), card_id TEXT NOT NULL REFERENCES cards(id), before_json TEXT NOT NULL, queue_json TEXT NOT NULL, position INTEGER NOT NULL, after_revision INTEGER NOT NULL, created_at INTEGER NOT NULL, undone_at INTEGER);"+
+  "CREATE INDEX IF NOT EXISTS review_undo_session ON review_undo(owner_id,session_id,created_at);"
+);
