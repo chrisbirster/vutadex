@@ -94,3 +94,38 @@ test('desktop dashboard has keyboard-visible controls, acceptable document load 
   const navigation=await page.evaluate(()=>performance.getEntriesByType('navigation')[0]?.duration||0);
   expect(navigation).toBeLessThan(15000);
 });
+
+test('interrupted draft autosave remains explicitly unsaved and can be reapplied',async({page})=>{
+  await signIn(page,unique('offline-draft'));
+  await createDeck(page,'Offline Draft '+Date.now());
+  await page.getByRole('link',{name:'Add Cards'}).last().click();
+  await page.route('**/api/v1/drafts/new',async route=>{
+    if(route.request().method()==='PUT')await route.abort('failed');
+    else await route.continue();
+  });
+  await page.getByLabel('Front').fill('My unsaved offline question');
+  await expect(page.getByRole('status').filter({hasText:/Unsaved:|Conflict:/})).toBeVisible({timeout:15000});
+  await expect(page.getByLabel('Front')).toHaveValue('My unsaved offline question');
+  await page.unroute('**/api/v1/drafts/new');
+  await page.getByRole('button',{name:'Check latest draft'}).click();
+  await expect(page.getByRole('alert',{name:'Concurrent draft edit'})).toBeVisible();
+  await page.getByRole('button',{name:'Reapply selected fields'}).click();
+  await expect(page.getByRole('status').filter({hasText:'Draft conflict resolved.'})).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Front')).toHaveValue('My unsaved offline question');
+});
+test('reconnecting a temporarily offline device catches up without a second account',async({browser})=>{
+  const a=await browser.newContext(),b=await browser.newContext();
+  const pa=await a.newPage(),pb=await b.newPage(),email=unique('offline-catchup');
+  try{
+    await signIn(pa,email);await signIn(pb,email);
+    await pb.goto('/decks');
+    await b.setOffline(true);
+    const title='Reconnected '+Date.now();
+    await createDeck(pa,title);
+    await b.setOffline(false);
+    await pb.bringToFront();
+    await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
+  }finally{await a.close();await b.close();}
+});
