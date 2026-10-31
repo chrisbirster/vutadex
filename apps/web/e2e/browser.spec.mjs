@@ -153,7 +153,7 @@ test('typed-answer interaction compares learner text and retains self-rating',as
 test('occlusion review displays owned image, hides region and reveals target on demand',async({page})=>{
   await signIn(page,unique('occlusion-review'));
   const origin='http://127.0.0.1:5173';
-  const image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==';
+  const image='iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAc0lEQVR42u3ZMQ3AIBBAUdpgpB6Q0gU/+GDETD3UChpuIC3J+/slvHATHHdvaefOtHkAAAAAAAAAAAAA35WjA894lx6o1MsKAQAAAAAAAAAAAAAAAAAAAAAAAAAAAKwt/D8Qfb93AwAAAAAAAAAAAAC/bQIgwgWpF3i3xQAAAABJRU5ErkJggg==';
   const media=await page.request.post('/api/v1/media',{headers:{Origin:origin},data:{data:image}});
   expect(media.status()).toBe(201);
   const {ref}=await media.json();
@@ -167,7 +167,9 @@ test('occlusion review displays owned image, hides region and reveals target on 
   const {id}=await session.json();
   await page.goto('/study/'+id);
   await expect(page.getByRole('img',{name:'Masked region to identify'})).toBeVisible();
-  await expect(page.getByAltText('Study image with occluded regions')).toBeVisible();
+  const imageElement=page.getByAltText('Study image with occluded regions');
+  await expect(imageElement).toBeVisible();
+  expect(await imageElement.evaluate(image=>image.naturalWidth)).toBeGreaterThan(0);
   await page.getByRole('button',{name:/Show Answer/}).click();
   await expect(page.getByRole('img',{name:'Revealed target region'})).toBeVisible();
   await expect(page.getByText('Bongo',{exact:true})).toBeVisible();
