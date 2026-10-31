@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useImmer } from 'use-immer';
 import { Home, Layers3, Play, SquarePlus, ChartNoAxesColumnIncreasing, Settings, Search, LogOut, Sparkles, Flame, BookOpen, Plus, ArrowRight, Eye, RotateCcw, Check, Clock, Target, ChevronLeft, ChevronRight, Keyboard, Mail, LoaderCircle, Brain, Menu, X, Download, PanelLeft, CircleHelp } from 'lucide-react';
-import {mergeEdits,applySelections,type EditableNote} from './merge.ts';
+import {reconcileFieldPaths,applyFieldSelections,type EditableNote} from './merge.ts';
 import {compareTypedAnswer} from './typed-answer.ts';
 import './style.css';
 
@@ -252,12 +252,12 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
   const [draftStatus,setDraftStatus]=useState('Loading draft...'),[draftConflict,setDraftConflict]=useState(false);
   const lastSaved=useRef(''),saving=useRef(false);
   type DraftFields={deckId:string;type:string;front:string;back:string;fields:string[];tags:string;revision:number};
-  const [draftCompare,setDraftCompare]=useState<{local:DraftFields;server:DraftFields|null;chosen:(keyof EditableNote)[]}|null>(null);
+  const [draftCompare,setDraftCompare]=useState<{local:DraftFields;server:DraftFields|null;chosen:string[]}|null>(null);
   async function refreshDraftConflict(){
     const response=await api<{draft:DraftFields|null}>('/drafts/new');
     const local={...formRef.current,revision:draftRevision};
     const base=lastSaved.current?JSON.parse(lastSaved.current) as DraftFields:local;
-    const merged=mergeEdits(toEditable(base),toEditable(local),toEditable(response.draft||{...local,fields:['',''],front:'',back:'',tags:''}));
+    const merged=reconcileFieldPaths(toEditable(base),toEditable(local),toEditable(response.draft||{...local,fields:['',''],front:'',back:'',tags:''}));
     setDraftCompare({local,server:response.draft,chosen:merged.changes});
     setDraftConflict(true);
     setDraftStatus('Conflict: your draft is not saved. Compare both versions before choosing.');
@@ -279,7 +279,7 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
       }else{
         const local=draftCompare.local;
         const remote=draftCompare.server||{...local,front:'',back:'',fields:['',''],tags:'',revision:0};
-        const merged=applySelections(toEditable(remote),toEditable(local),draftCompare.chosen);
+        const merged=applyFieldSelections(toEditable(remote),toEditable(local),draftCompare.chosen);
         const selected={...merged,deckId:local.deckId};
         const response=await api<{revision:number}>('/drafts/new',{method:'PUT',body:{...selected,revision:remote.revision}});
         setForm(selected);lastSaved.current=JSON.stringify(selected);setDraftRevision(response.revision);
@@ -317,7 +317,7 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
   return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<><label htmlFor="target-deck">Deck</label><select id="target-deck" required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t.replaceAll('-',' ')}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':t==='basic'?'Front → Back':'Choose format'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&draftCompare&&<section className="card conflict" role="alert" aria-label="Concurrent draft edit">
   <h3>Draft conflict</h3><p>Your edits are still available locally. Another device saved a different draft.</p>
   <DifferenceTable local={draftCompare.local} server={draftCompare.server||{...draftCompare.local,front:'',back:'',fields:['',''],tags:''}}/>
-  {(['type','fields','tags'] as const).map(key=><label key={key} className="checkbox-line"><input type="checkbox" checked={draftCompare.chosen.includes(key)} onChange={e=>setDraftCompare(c=>c?{...c,chosen:e.target.checked?[...c.chosen,key]:c.chosen.filter(x=>x!==key)}:null)}/> Keep my {key}</label>)}
+  {(['type','tags',...draftCompare.local.fields.map((_,index)=>'fields['+index+']')]).map(key=><label key={key} className="checkbox-line"><input type="checkbox" checked={draftCompare.chosen.includes(key)} onChange={e=>setDraftCompare(c=>c?{...c,chosen:e.target.checked?[...c.chosen,key]:c.chosen.filter(x=>x!==key)}:null)}/> Keep my {key}</label>)}
   <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void resolveDraftConflict(false)}>Use server draft</button>
   <button type="button" className="primary" disabled={busy} onClick={()=>void resolveDraftConflict(true)}>Reapply selected fields</button></div>
 </section>}
@@ -346,7 +346,7 @@ function EditNotePage(){
   const base=useRef<EditableNote|null>(null),loadedRevision=useRef<number|null>(null);
   const lastDeckId=useRef('');
   const formRef=useRef(form);formRef.current=form;
-  const [conflict,setConflict]=useState<{server:RemoteNote;local:EditableNote;chosen:(keyof EditableNote)[]}|null>(null);
+  const [conflict,setConflict]=useState<{server:RemoteNote;local:EditableNote;chosen:string[]}|null>(null);
   useEffect(()=>{
     if(!data?.note)return;
     lastDeckId.current=data.note.deckId;
@@ -355,15 +355,15 @@ function EditNotePage(){
       base.current=toEditable(data.note);loadedRevision.current=data.note.revision;setInitialized(true);
     }else if(data.note.revision!==loadedRevision.current){
       const your=toEditable(formRef.current);
-      const changed=mergeEdits(base.current||your,your,data.note);
-      setConflict({server:data.note,local:your,chosen:changed.changes});
+      const changed=reconcileFieldPaths(base.current||your,your,data.note);
+      setConflict({server:data.note,local:your,chosen:changed.localChanges});
       setFailure('This note changed on another device. Your work is preserved below.');
     }
   },[data,setForm]);
   async function refreshConflict(local:EditableNote){
     const response=await api<{note:RemoteNote}>('/notes/'+encodeURIComponent(noteId));
-    const changed=mergeEdits(base.current||local,local,response.note);
-    setConflict({server:response.note,local,chosen:changed.changes});
+    const changed=reconcileFieldPaths(base.current||local,local,response.note);
+    setConflict({server:response.note,local,chosen:changed.localChanges});
   }
   async function save(e:React.FormEvent){
     e.preventDefault();if(conflict)return;setBusy(true);setFailure('');setMessage('');
@@ -386,7 +386,7 @@ function EditNotePage(){
         setForm({...toEditable(server),revision:server.revision});base.current=toEditable(server);
         loadedRevision.current=server.revision;setConflict(null);setMessage('Server version restored. Local changes were discarded by your choice.');
       }else{
-        const merged=applySelections(server,conflict.local,conflict.chosen);
+        const merged=applyFieldSelections(server,conflict.local,conflict.chosen);
         const saved=await api<{note:{revision:number}}>('/notes/'+encodeURIComponent(noteId),{method:'PUT',body:{...merged,revision:server.revision}});
         setForm({...merged,revision:saved.note.revision});base.current=merged;
         loadedRevision.current=saved.note.revision;setConflict(null);setMessage('Your selected changes were reapplied to the latest version.');
@@ -407,7 +407,7 @@ function EditNotePage(){
       {conflict&&<section className="card conflict" role="alert" aria-label="Concurrent note edit">
         <h3>Two devices edited this note</h3><p>Your unsaved text has not been discarded. Select the fields to reapply on top of the latest server version.</p>
         <DifferenceTable local={conflict.local} server={conflict.server}/>
-        {(['type','fields','tags'] as const).map(k=><label className="checkbox-line" key={k}><input type="checkbox" checked={conflict.chosen.includes(k)} onChange={e=>setConflict(c=>c?{...c,chosen:e.target.checked?[...c.chosen,k]:c.chosen.filter(x=>x!==k)}:null)}/> Reapply my {k}</label>)}
+        {(['type','tags',...conflict.local.fields.map((_,index)=>'fields['+index+']')]).map(k=><label className="checkbox-line" key={k}><input type="checkbox" checked={conflict.chosen.includes(k)} onChange={e=>setConflict(c=>c?{...c,chosen:e.target.checked?[...c.chosen,k]:c.chosen.filter(x=>x!==k)}:null)}/> Reapply my {k}</label>)}
         <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void applyConflict(false)}>Use latest server version</button>
           <button type="button" className="primary" disabled={busy} onClick={()=>void applyConflict(true)}>Reapply selected changes</button></div>
       </section>}
