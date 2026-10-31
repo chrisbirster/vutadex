@@ -57,3 +57,9 @@ db.exec(
   "CREATE TABLE IF NOT EXISTS legacy_migrations (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, source_id TEXT NOT NULL, checksum TEXT NOT NULL, summary_json TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(owner_id,source_id));"+
   "CREATE TABLE IF NOT EXISTS legacy_raw_events (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, source_id TEXT NOT NULL, original_event_id INTEGER NOT NULL, mapped_card_id TEXT NOT NULL REFERENCES cards(id), raw_json TEXT NOT NULL, PRIMARY KEY(owner_id,source_id,original_event_id));"
 );
+
+addColumn('review_events','review_count_before','review_count_before INTEGER');
+addColumn('review_events','last_review_at_before','last_review_at_before INTEGER');
+addColumn('review_events','due_at_before','due_at_before INTEGER');
+db.exec("CREATE TABLE IF NOT EXISTS study_activity (id TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id),session_id TEXT NOT NULL REFERENCES study_sessions(id),duration_ms INTEGER NOT NULL CHECK(duration_ms>0 AND duration_ms<=15000),created_at INTEGER NOT NULL);");
+db.exec("CREATE INDEX IF NOT EXISTS study_activity_owner ON study_activity(owner_id,created_at);");

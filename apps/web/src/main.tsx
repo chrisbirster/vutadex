@@ -435,6 +435,19 @@ function humanInterval(ms:number):string{
 }
 function StudySessionPage(){const {sessionId}=routeStudySession.useParams();const {data,loading,error,reload}=useResource<Study>('/study/'+encodeURIComponent(sessionId));const [revealed,setRevealed]=useState(false);const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');const [canUndo,setCanUndo]=useState(false);const rate=async(rating:number)=>{if(!data?.card||!revealed||busy)return;setBusy(true);setMessage('');try{await api('/study/'+encodeURIComponent(sessionId)+'/rate',{method:'POST',body:{rating,revision:data.revision,operationId:crypto.randomUUID()}});setRevealed(false);setCanUndo(true);reload();}catch(e){setMessage(String(e));reload();}finally{setBusy(false);}};
   useEffect(()=>{const handle=(e:KeyboardEvent)=>{if(['INPUT','TEXTAREA','SELECT'].includes((e.target as HTMLElement)?.tagName))return;if(e.code==='Space'&&!revealed){e.preventDefault();setRevealed(true);}if(revealed&&['1','2','3','4'].includes(e.key)){e.preventDefault();void rate(Number(e.key));}};window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle);},[revealed,busy,data,sessionId]);
+
+  const lastInteraction=useRef(Date.now());
+  useEffect(()=>{
+    const mark=()=>{lastInteraction.current=Date.now();};
+    window.addEventListener('keydown',mark);
+    window.addEventListener('pointerdown',mark);
+    const timer=window.setInterval(()=>{
+      if(document.visibilityState!=='visible'||!data?.card||data.paused||Date.now()-lastInteraction.current>60000)return;
+      void api('/study/'+encodeURIComponent(sessionId)+'/activity',{method:'POST',
+        body:{durationMs:15000,eventId:crypto.randomUUID()}}).catch(()=>{/* Metrics are best-effort; reviews are authoritative. */});
+    },15000);
+    return()=>{window.clearInterval(timer);window.removeEventListener('keydown',mark);window.removeEventListener('pointerdown',mark);};
+  },[sessionId,Boolean(data?.card),data?.paused]);
   async function updateSession(action:'pause'|'resume'|'undo'){
     if(!data)return;setBusy(true);setMessage('');
     try{await api('/study/'+encodeURIComponent(sessionId)+'/'+action,{method:'POST',body:{revision:data.revision}});
@@ -461,7 +474,7 @@ function computeStreak(reviews:Review[],timezone='UTC'):number{
   return streak;
 }
 function StatsPage(){
-  const {data,loading,error}=useResource<{timezone:string;reviews:Review[];forecast:{day:string;due:number}[]}>('/stats');
+  const {data,loading,error}=useResource<{timezone:string;reviews:Review[];forecast:{day:string;due:number}[];matureRetention:{eligible:number;recalled:number;observedPercent:number|null;byDeck:{deck:string;eligible:number;observedPercent:number}[]};activeStudyMs:number}>('/stats');
   if(loading)return <Loading/>;if(error)return <Notice text={error}/>;
   const reviews=data?.reviews||[],zone=data?.timezone||'UTC',forecast=data?.forecast||[];
   const counts=new Map<string,number>();
@@ -476,6 +489,7 @@ function StatsPage(){
       <Tile icon={Flame} value={computeStreak(reviews,zone)} label="Day streak" tone="cream"/>
       <Tile icon={Target} value={reviews.length?Math.round(recalled/reviews.length*100)+'%':'—'} label="Non-Again ratings" tone="blue"/>
       <Tile icon={Clock} value={counts.size} label="Active study days" tone="peach"/>
+      <Tile icon={Brain} value={data?.matureRetention.observedPercent===null?'—':data?.matureRetention.observedPercent+'%'} label={'Mature retention ('+(data?.matureRetention.eligible||0)+')'} tone="mint"/>
     </div>
     <div className="stats-grid">
       <section className="card"><h3>Review Heatmap</h3><p className="muted">Your last 12 weeks, in {zone}.</p>
@@ -484,6 +498,16 @@ function StatsPage(){
       </section>
       <section className="card"><h3>Rating Breakdown</h3><p className="muted">Recent self-ratings, excluding undone reviews. Not a mature-review retention metric.</p>
         {['Again','Hard','Good','Easy'].map((name,i)=>{const count=reviews.filter(r=>r.rating===i+1).length;return <div className="breakdown" key={name}><span>{name}</span><div className="progress"><div style={{width:reviews.length?count/reviews.length*100+'%':'0%'}}/></div><strong>{count}</strong></div>;})}
+      </section>
+      <section className="card"><h3>Observed Mature Retention</h3>
+        <p className="muted">Eligible: previously reviewed cards, due on or before the review, and at least 24 hours since the previous review. Immediate retries, first reviews and undone reviews do not count. Hard/Good/Easy are recalled; Again is not.</p>
+        <strong>{data?.matureRetention.observedPercent===null?'Not enough eligible reviews':data?.matureRetention.observedPercent+'% recalled'}</strong>
+        <p className="muted">Eligible sample: {data?.matureRetention.eligible||0} reviews, {data?.matureRetention.recalled||0} recalled. This is not FSRS target retention or typed-answer accuracy.</p>
+        {data?.matureRetention.byDeck.map(row=><div key={row.deck} className="breakdown"><span>{row.deck}</span><strong>{row.observedPercent}% ({row.eligible})</strong></div>)}
+      </section>
+      <section className="card"><h3>Recorded Active Study Time</h3>
+        <p><strong>{Math.round((data?.activeStudyMs||0)/60000)} minutes</strong></p>
+        <p className="muted">Bounded, visible, recently active study intervals only. Not an independently verified timer.</p>
       </section>
       <section className="card"><h3>Due Forecast · Next 7 Days</h3><p className="muted">Currently scheduled future cards; counts may change after reviews.</p>
         {forecast.map(row=><div key={row.day} className="breakdown"><span>{row.day}</span><strong>{row.due} due</strong></div>)}
