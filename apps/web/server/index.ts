@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
+import { MediaError, parseBase64Media, refHash } from './media.ts';
 import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex, accountDayKey } from './study-policy.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
@@ -21,7 +22,7 @@ const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 const token = () => randomBytes(32).toString('base64url');
 const query = <T>(sql: string, ...args: (string | number | null)[]) => db.prepare(sql).get(...args) as T | undefined;
 const list = <T>(sql: string, ...args: (string | number | null)[]) => db.prepare(sql).all(...args) as T[];
-const run = (sql: string, ...args: (string | number | null)[]) => db.prepare(sql).run(...args);
+const run = (sql: string, ...args: (string | number | null | Uint8Array)[]) => db.prepare(sql).run(...args);
 class ApiError extends Error { readonly status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 function required(value: unknown, name: string, max = 500): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) throw new ApiError(400, 'Invalid ' + name);
@@ -239,6 +240,44 @@ app.get('/api/v1/changes/stream',handler((req,res)=>{
   const heartbeat=setInterval(()=>{if(!res.writableEnded)res.write(': heartbeat\n\n');},15000);
   res.on('close',()=>{closed=true;clearInterval(polling);clearInterval(heartbeat);});
 }));
+
+app.post('/api/v1/media',handler((req,res)=>{
+  const user=account(req),media=parseBase64Media(req.body?.data);
+  const saved=transaction(()=>{
+    run('INSERT INTO media_blobs(owner_id,sha256,mime,bytes,width,height,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner_id,sha256) DO NOTHING',
+      user.id,media.sha256,media.mime,media.bytes,media.width,media.height,now());
+    emitChange(user.id,'created','media',media.sha256);
+    return {ref:'deez-media://sha256:'+media.sha256,sha256:media.sha256,mime:media.mime,width:media.width,height:media.height};
+  });
+  res.status(201).json(saved);
+}));
+app.get('/api/v1/media/:hash',handler((req,res)=>{
+  const user=account(req),hash=String(req.params.hash);
+  if(!/^[a-f0-9]{64}$/.test(hash))throw new ApiError(404,'Image not found');
+  const row=query<{mime:string;bytes:Uint8Array}>('SELECT mime,bytes FROM media_blobs WHERE owner_id=? AND sha256=?',user.id,hash);
+  if(!row)throw new ApiError(404,'Image not found');
+  res.setHeader('content-type',row.mime);
+  res.setHeader('content-security-policy',"default-src 'none'; sandbox");
+  res.setHeader('x-content-type-options','nosniff');
+  res.setHeader('cache-control','private, max-age=300');
+  res.setHeader('etag','"'+hash+'"');
+  res.end(Buffer.from(row.bytes));
+}));
+app.post('/api/v1/media/prune',handler((req,res)=>{
+  const user=account(req);
+  // Check canonical owned note references, never infer ownership from client-provided ref.
+  const rows=list<{sha256:string}>('SELECT sha256 FROM media_blobs WHERE owner_id=?',user.id);
+  const notes=list<{fields_json:string|null}>('SELECT fields_json FROM notes WHERE owner_id=? AND type=?',user.id,'image-occlusion');
+  const used=new Set(notes.flatMap(n=>{
+    try {const f=JSON.parse(n.fields_json||'[]') as string[];const hash=refHash(f[0]||'');return hash?[hash]:[];}
+    catch{return [];}
+  }));
+  const orphans=rows.map(x=>x.sha256).filter(hash=>!used.has(hash));
+  if(req.body?.dryRun!==false){res.json({orphans,deleted:0});return;}
+  transaction(()=>{for(const hash of orphans){run('DELETE FROM media_blobs WHERE owner_id=? AND sha256=?',user.id,hash);emitChange(user.id,'deleted','media',hash);}});
+  res.json({orphans,deleted:orphans.length});
+}));
+
 app.get('/api/v1/overview',handler((req,res)=>{
   const user=account(req);const t=now();
   const decks=list('SELECT d.id,d.name,d.description,COUNT(c.id) AS cards,COALESCE(SUM(CASE WHEN c.due_at<=? THEN 1 ELSE 0 END),0) AS due FROM decks d LEFT JOIN cards c ON c.deck_id=d.id AND c.owner_id=d.owner_id WHERE d.owner_id=? GROUP BY d.id ORDER BY d.created_at DESC',t,user.id);
@@ -272,7 +311,14 @@ function getImportedDeck(body:any):ImportedDeck{
   if(body.format==='deck')return parseDeckFile(body.content);
   throw new ApiError(400,'Expected import format deck or csv');
 }
+function verifyMedia(owner:string,note:NotePayload):void{
+  if(note.type!=='image-occlusion')return;
+  const hash=refHash(note.fields[0]||'');
+  if(!hash||!query('SELECT sha256 FROM media_blobs WHERE owner_id=? AND sha256=?',owner,hash))
+    throw new ApiError(404,'Owned image not found');
+}
 function writeNote(owner:string,deckId:string,note:NotePayload,existing?:{id:string;revision:number}) {
+  verifyMedia(owner,note);
   const variants=generateVariants(note),time=now();
   const id=existing?.id||randomUUID();
   if(existing){
@@ -520,7 +566,7 @@ const dist=resolve(import.meta.dirname,'../dist');
 if (existsSync(dist)) {app.use(express.static(dist));app.get('/{*path}',(_req,res)=>res.sendFile(resolve(dist,'index.html')));}
 app.use((err:unknown,_req:Request,res:Response,_next:NextFunction)=>{
   const status=err instanceof ApiError?err.status:500;
-  if(err instanceof ContentError){res.status(400).json({error:err.message});return;}
+  if(err instanceof ContentError||err instanceof MediaError){res.status(400).json({error:err.message});return;}
   if(status===500)logger.error({name:err instanceof Error?err.name:'Error'},'request failed');
   res.status(status).json({error:status===500?'Unexpected server error':(err as Error).message});
 });

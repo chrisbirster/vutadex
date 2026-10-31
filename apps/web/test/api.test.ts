@@ -383,3 +383,31 @@ test('M4 advanced notes persist CLI-compatible field arrays and retain stable ge
   ].join('\n')},user.cookie);
   assert.equal(preview.status,200);
 });
+
+test('owned images reject foreign access, script payloads and prune only unreferenced bytes',async()=>{
+  const owner=await session('media-owner@example.com'),other=await session('media-other@example.com');
+  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==';
+  const bad=await request('/media','POST',{data:Buffer.from('<svg onload="alert(1)"/>').toString('base64')},owner.cookie);
+  assert.equal(bad.status,400);
+  const uploaded=await request('/media','POST',{data:png},owner.cookie);
+  assert.equal(uploaded.status,201);
+  const meta=(await uploaded.json()) as {ref:string;sha256:string;mime:string};
+  assert.equal(meta.mime,'image/png');
+  assert.equal((await request('/media/'+meta.sha256,'GET',undefined,other.cookie)).status,404);
+  const read=await request('/media/'+meta.sha256,'GET',undefined,owner.cookie);
+  assert.equal(read.status,200);
+  assert.match(read.headers.get('content-type')||'',/image\/png/);
+  assert.equal(read.headers.get('x-content-type-options'),'nosniff');
+  const masks=JSON.stringify([{id:1,x:0.1,y:0.1,width:0.3,height:0.3,answer:'Brain'}]);
+  const deck=(await (await request('/decks','POST',{name:'Image Notes'},owner.cookie)).json() as {deck:{id:string}}).deck.id;
+  assert.equal((await request('/notes','POST',{deckId:deck,type:'image-occlusion',fields:[meta.ref,masks,''],tags:''},other.cookie)).status,404);
+  assert.equal((await request('/notes','POST',{deckId:deck,type:'image-occlusion',fields:[meta.ref,masks,''],tags:''},owner.cookie)).status,201);
+  const preview=await request('/import/preview','POST',{format:'deck',content:[
+    JSON.stringify({kind:'deck',format:'plandalf.deck',version:2,name:'Bad Media Import'}),
+    JSON.stringify({kind:'note',note_type:'image-occlusion',fields:[meta.ref,masks,''],tags_json:'[]'})
+  ].join('\n')},owner.cookie);
+  assert.equal(preview.status,400);
+  const prune=await request('/media/prune','POST',{dryRun:true},owner.cookie);
+  assert.equal(prune.status,200);
+  assert.deepEqual((await prune.json() as {orphans:string[]}).orphans,[]);
+});

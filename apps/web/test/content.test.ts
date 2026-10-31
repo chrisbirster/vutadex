@@ -17,7 +17,7 @@ test('existing note variants survive and full advanced note types generate corre
 test('reject invalid choice schema rather than persisting partial content',()=>{
   assert.throws(()=>make('multiple-choice',['Prompt','[{"id":"a","text":"A"}]','a','']),/2–100/);
   assert.throws(()=>make('multiple-select',['Prompt','[{"id":"a","text":"A"},{"id":"b","text":"B"}]','["c"]','']),/present in choices/);
-  assert.throws(()=>make('image-occlusion',['x','[]','']),/Unsupported note type/);
+  assert.throws(()=>make('image-occlusion',['x','[]','']),/Image must be/);
 });
 test('portable v2 preserves extended fields',()=>{
   const record=make('multiple-choice',['Which city?',JSON.stringify([{id:'a',text:'Paris'},{id:'b',text:'Rome'}]),'a','Because']);

@@ -2,13 +2,13 @@
 import { generateCards, NOTE_FIELDS, NoteError } from '../../../services/note-types.ts';
 import type { NoteType } from '../../../models/note.ts';
 
-export type NoteKind = Exclude<NoteType,'image-occlusion'>;
+export type NoteKind = NoteType;
 export type NotePayload={type:NoteKind;front:string;back:string;tags:string;fields:string[]};
 export type Variant={name:string;front:string;back:string};
 export type ImportedDeck={name:string;notes:NotePayload[]};
 export class ContentError extends Error {}
 const MAX_TEXT=6000;
-const kindList=(Object.keys(NOTE_FIELDS) as NoteType[]).filter(x=>x!=='image-occlusion');
+const kindList=Object.keys(NOTE_FIELDS) as NoteType[];
 export const CONTENT_NOTE_TYPES=kindList;
 function plain(value:unknown,label:string,optional=false,max=MAX_TEXT):string{
   if(typeof value!=='string'||value.length>max||value.includes('\0')||(!optional&&!value.trim()))
@@ -75,6 +75,7 @@ export function parseDeckFile(content:string):ImportedDeck{
   for(let i=1;i<lines.length;i++){
     const row=exact(parseJson(lines[i]!),['kind','note_type','fields','tags_json']);
     if(row.kind!=='note')throw new ContentError('Unsupported note record');
+    if(row.note_type==='image-occlusion')throw new ContentError('Image-occlusion cannot be imported via content-only .deck without portable image bytes');
     notes.push(validateNote({type:row.note_type,fields:row.fields,tags:tagValue(row.tags_json)}));
   }
   return {name,notes};
