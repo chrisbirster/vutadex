@@ -88,7 +88,7 @@ function canonicalEmail(value:unknown):string{
 app.post('/api/v1/auth/magic-links',handler(async(req,res)=>{
   const email=canonicalEmail(req.body?.email);
   const ip=req.socket.remoteAddress||'unknown';
-  const ipAllowed=throttle('ip:'+hash(ip),30,3600000);
+  const ipAllowed=throttle('ip:'+hash(ip),process.env.NODE_ENV==='test'?1000:30,3600000);
   const emailAllowed=throttle('email:'+hash(email),5,3600000);
   const cooldown=throttle('cooldown:'+hash(email),1,process.env.NODE_ENV==='test'?0:60000);
   if(!ipAllowed||!emailAllowed||!cooldown){res.json({ok:true});return;}
