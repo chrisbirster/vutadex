@@ -27,7 +27,7 @@ function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>
         while(!closed&&more){
           const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq);
           if(response.changes.length)setState(d=>{d.revision++;});
-          seq=response.cursor;more=response.hasMore;
+          seq=Math.max(seq,response.cursor);more=response.hasMore;
         }
         if(!closed)setState(d=>{d.connected=true;d.cursor=seq;});
       }catch{if(!closed)setState(d=>{d.connected=false;});}

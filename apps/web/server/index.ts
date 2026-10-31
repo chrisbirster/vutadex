@@ -183,7 +183,7 @@ app.get('/api/v1/changes/stream',handler((req,res)=>{
   publish();
   const polling=setInterval(()=>{try{publish();}catch{res.end();}},2000);
   const heartbeat=setInterval(()=>{if(!res.writableEnded)res.write(': heartbeat\n\n');},15000);
-  req.on('close',()=>{closed=true;clearInterval(polling);clearInterval(heartbeat);});
+  res.on('close',()=>{closed=true;clearInterval(polling);clearInterval(heartbeat);});
 }));
 app.get('/api/v1/overview',handler((req,res)=>{
   const user=account(req);const t=now();
@@ -301,7 +301,7 @@ app.get('/api/v1/preferences',handler((req,res)=>{
 app.put('/api/v1/preferences',handler((req,res)=>{
   const user=account(req),zone=required(req.body?.timezone,'timezone',120);
   if(!validTimezone(zone))throw new ApiError(400,'Unknown IANA timezone');
-  run('INSERT INTO user_preferences(user_id,timezone) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone',user.id,zone);
+  transaction(()=>{run('INSERT INTO user_preferences(user_id,timezone) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone',user.id,zone);emitChange(user.id,'updated','preferences',user.id);});
   res.json({timezone:zone});
 }));
 type ScheduledCard={id:string;note_id:string;review_count:number;due_at:number};
@@ -371,17 +371,23 @@ app.get('/api/v1/study/:id',handler((req,res)=>{
 app.post('/api/v1/study/:id/pause',handler((req,res)=>{
   const user=account(req),revision=Number(req.body?.revision);
   if(!Number.isSafeInteger(revision))throw new ApiError(400,'Invalid revision');
-  const changed=run("UPDATE study_sessions SET status='paused',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
-    String(req.params.id),user.id,revision);
-  if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+  transaction(()=>{
+    const changed=run("UPDATE study_sessions SET status='paused',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
+      String(req.params.id),user.id,revision);
+    if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+    emitChange(user.id,'updated','study',String(req.params.id));
+  });
   res.json({revision:revision+1,paused:true});
 }));
 app.post('/api/v1/study/:id/resume',handler((req,res)=>{
   const user=account(req),revision=Number(req.body?.revision);
   if(!Number.isSafeInteger(revision))throw new ApiError(400,'Invalid revision');
-  const changed=run("UPDATE study_sessions SET status='active',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
-    String(req.params.id),user.id,revision);
-  if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+  transaction(()=>{
+    const changed=run("UPDATE study_sessions SET status='active',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
+      String(req.params.id),user.id,revision);
+    if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+    emitChange(user.id,'updated','study',String(req.params.id));
+  });
   res.json({revision:revision+1,paused:false});
 }));
 app.post('/api/v1/study/:id/rate',handler((req,res)=>{
