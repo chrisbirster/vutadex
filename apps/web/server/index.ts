@@ -138,6 +138,105 @@ app.post('/api/v1/sessions/revoke-all',handler((req,res)=>{
   const user=account(req);run('DELETE FROM sessions WHERE user_id=?',user.id);
   res.clearCookie(cookieName,{path:'/',secure:production,sameSite:'lax',httpOnly:true});res.json({ok:true});
 }));
+
+type ChangeRow={seq:number;kind:string;resource:string;resource_id:string;created_at:number};
+function emitChange(owner:string,kind:string,resource:string,id:string):void {
+  run('INSERT INTO account_changes(owner_id,kind,resource,resource_id,created_at) VALUES(?,?,?,?,?)',owner,kind,resource,id,now());
+}
+function cursor(raw:unknown):number{
+  const value=raw===undefined?0:Number(raw);
+  if(!Number.isSafeInteger(value)||value<0)throw new ApiError(400,'Invalid change cursor');
+  return value;
+}
+function changes(owner:string,since:number,limit:number){
+  const found=list<ChangeRow>('SELECT seq,kind,resource,resource_id,created_at FROM account_changes WHERE owner_id=? AND seq>? ORDER BY seq ASC LIMIT ?',
+    owner,since,limit+1);
+  const rows=found.slice(0,limit);
+  return {changes:rows,cursor:rows.at(-1)?.seq??since,hasMore:found.length>limit};
+}
+
+function draftKey(value:unknown):string {
+  const key=required(value,'draft key',80);
+  if(!/^[a-z0-9-]+$/.test(key))throw new ApiError(400,'Invalid draft key');
+  return key;
+}
+function draftInput(value:unknown):{deckId:string;type:string;front:string;back:string;tags:string}{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new ApiError(400,'Invalid draft');
+  const body=value as Record<string,unknown>,result:{[k:string]:string}={};
+  for(const [key,max] of [['deckId',100],['type',30],['front',6000],['back',6000],['tags',300]] as const){
+    const x=body[key]??'';
+    if(typeof x!=='string'||x.length>max||x.includes('\0'))throw new ApiError(400,'Invalid draft '+key);
+    result[key]=x;
+  }
+  if(result.type && !['basic','reverse','cloze'].includes(result.type))throw new ApiError(400,'Unsupported draft type');
+  return result as {deckId:string;type:string;front:string;back:string;tags:string};
+}
+app.get('/api/v1/drafts/:key',handler((req,res)=>{
+  const user=account(req),key=draftKey(req.params.key);
+  const row=query<{payload_json:string;revision:number;updated_at:number}>(
+    'SELECT payload_json,revision,updated_at FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+  res.json({draft:row?{...JSON.parse(row.payload_json),revision:row.revision,updatedAt:row.updated_at}:null});
+}));
+app.put('/api/v1/drafts/:key',handler((req,res)=>{
+  const user=account(req),key=draftKey(req.params.key),expected=Number(req.body?.revision);
+  if(!Number.isSafeInteger(expected)||expected<0)throw new ApiError(400,'Invalid revision');
+  const payload=draftInput(req.body);
+  const saved=transaction(()=>{
+    const row=query<{revision:number}>('SELECT revision FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+    if((row?.revision??0)!==expected)throw new ApiError(409,'Draft changed on another device. Reload before saving.');
+    const revision=expected+1;
+    if(row)run('UPDATE account_drafts SET payload_json=?,revision=?,updated_at=? WHERE owner_id=? AND draft_key=?',
+      JSON.stringify(payload),revision,now(),user.id,key);
+    else run('INSERT INTO account_drafts(owner_id,draft_key,payload_json,revision,updated_at) VALUES(?,?,?,?,?)',
+      user.id,key,JSON.stringify(payload),revision,now());
+    emitChange(user.id,'updated','draft',key);
+    return {revision,updatedAt:now()};
+  });
+  res.json(saved);
+}));
+app.delete('/api/v1/drafts/:key',handler((req,res)=>{
+  const user=account(req),key=draftKey(req.params.key),expected=Number(req.body?.revision);
+  if(!Number.isSafeInteger(expected)||expected<0)throw new ApiError(400,'Invalid revision');
+  transaction(()=>{
+    const row=query<{revision:number}>('SELECT revision FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+    if(!row)throw new ApiError(404,'Draft not found');
+    if(row.revision!==expected)throw new ApiError(409,'Draft changed on another device');
+    run('DELETE FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+    emitChange(user.id,'deleted','draft',key);
+  });
+  res.json({ok:true});
+}));
+app.get('/api/v1/changes',handler((req,res)=>{
+  const user=account(req),since=cursor(req.query.since);
+  res.json(changes(user.id,since,200));
+}));
+app.get('/api/v1/changes/stream',handler((req,res)=>{
+  const user=account(req);
+  let since=cursor(req.headers['last-event-id']||req.query.since);
+  const credential=cookies(req)[cookieName];
+  if(!credential)throw new ApiError(401,'Sign in required');
+  const tokenHash=hash(credential);
+  res.status(200).set({'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'});
+  res.flushHeaders();
+  res.write(': connected\n\n');
+  let closed=false;
+  const publish=()=>{
+    if(closed||res.writableEnded)return;
+    const active=query<{user_id:string;last_seen:number;expires_at:number}>('SELECT user_id,last_seen,expires_at FROM sessions WHERE token_hash=?',tokenHash);
+    if(!active||active.user_id!==user.id||active.expires_at<=now()||active.last_seen+30*86400000<=now()){
+      res.write('event: session-expired\ndata: {}\n\n');res.end();return;
+    }
+    const page=changes(user.id,since,100);
+    for(const change of page.changes){
+      since=change.seq;
+      res.write('id: '+change.seq+'\nevent: change\ndata: '+JSON.stringify(change)+'\n\n');
+    }
+  };
+  publish();
+  const polling=setInterval(()=>{try{publish();}catch{res.end();}},2000);
+  const heartbeat=setInterval(()=>{if(!res.writableEnded)res.write(': heartbeat\n\n');},15000);
+  res.on('close',()=>{closed=true;clearInterval(polling);clearInterval(heartbeat);});
+}));
 app.get('/api/v1/overview',handler((req,res)=>{
   const user=account(req);const t=now();
   const decks=list('SELECT d.id,d.name,d.description,COUNT(c.id) AS cards,COALESCE(SUM(CASE WHEN c.due_at<=? THEN 1 ELSE 0 END),0) AS due FROM decks d LEFT JOIN cards c ON c.deck_id=d.id AND c.owner_id=d.owner_id WHERE d.owner_id=? GROUP BY d.id ORDER BY d.created_at DESC',t,user.id);
@@ -152,7 +251,7 @@ app.get('/api/v1/decks',handler((req,res)=>{
 app.post('/api/v1/decks',handler((req,res)=>{
   const user=account(req);const id=randomUUID();const name=required(req.body?.name,'deck name',120);
   const description=typeof req.body?.description==='string'?req.body.description.slice(0,500):'';
-  try { run('INSERT INTO decks(id,owner_id,name,description,created_at) VALUES(?,?,?,?,?)',id,user.id,name,description,now()); }
+  try { transaction(()=>{run('INSERT INTO decks(id,owner_id,name,description,created_at) VALUES(?,?,?,?,?)',id,user.id,name,description,now());emitChange(user.id,'created','deck',id);}); }
   catch(e){if(String(e).includes('UNIQUE')) throw new ApiError(409,'Deck name already exists');throw e;}
   res.status(201).json({deck:{id,name,description}});
 }));
@@ -197,7 +296,7 @@ app.post('/api/v1/notes',handler((req,res)=>{
   const user=account(req),deckId=required(req.body?.deckId,'deck ID',100);
   if(!query('SELECT id FROM decks WHERE id=? AND owner_id=?',deckId,user.id))throw new ApiError(404,'Deck not found');
   const note=validateNote(req.body);
-  const saved=transaction(()=>writeNote(user.id,deckId,note));
+  const saved=transaction(()=>{const saved=writeNote(user.id,deckId,note);emitChange(user.id,'created','note',saved.id);return saved;});
   res.status(201).json({note:saved,generatedCards:saved.generatedCards});
 }));
 app.get('/api/v1/notes/:id',handler((req,res)=>{
@@ -214,7 +313,7 @@ app.put('/api/v1/notes/:id',handler((req,res)=>{
   const revision=Number(req.body?.revision);
   if(!Number.isSafeInteger(revision)||revision<0)throw new ApiError(400,'Expected note revision');
   const note=validateNote(req.body);
-  const saved=transaction(()=>writeNote(user.id,existing.deck_id,note,{id,revision}));
+  const saved=transaction(()=>{const saved=writeNote(user.id,existing.deck_id,note,{id,revision});emitChange(user.id,'updated','note',id);return saved;});
   res.json({note:saved});
 }));
 app.post('/api/v1/import/preview',handler((req,res)=>{
@@ -231,7 +330,7 @@ app.post('/api/v1/import',handler((req,res)=>{
   try{
     transaction(()=>{
       run('INSERT INTO decks(id,owner_id,name,description,created_at) VALUES(?,?,?,?,?)',id,user.id,imported.name,'Imported content-only deck',now());
-      for(const note of imported.notes)writeNote(user.id,id,note);
+      for(const note of imported.notes){const saved=writeNote(user.id,id,note);emitChange(user.id,'created','note',saved.id);}emitChange(user.id,'created','deck',id);
     });
   }catch(e){if(String(e).includes('UNIQUE'))throw new ApiError(409,'Deck name already exists');throw e;}
   res.status(201).json({deckId:id,notes:imported.notes.length});
@@ -254,7 +353,7 @@ app.get('/api/v1/preferences',handler((req,res)=>{
 app.put('/api/v1/preferences',handler((req,res)=>{
   const user=account(req),zone=required(req.body?.timezone,'timezone',120);
   if(!validTimezone(zone))throw new ApiError(400,'Unknown IANA timezone');
-  run('INSERT INTO user_preferences(user_id,timezone) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone',user.id,zone);
+  transaction(()=>{run('INSERT INTO user_preferences(user_id,timezone) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone',user.id,zone);emitChange(user.id,'updated','preferences',user.id);});
   res.json({timezone:zone});
 }));
 type ScheduledCard={id:string;note_id:string;review_count:number;due_at:number};
@@ -287,7 +386,7 @@ app.post('/api/v1/study',handler((req,res)=>{
     if(queue.length>=100)break;
   }
   const id=randomUUID();
-  run('INSERT INTO study_sessions(id,owner_id,queue_json,created_at) VALUES(?,?,?,?)',id,user.id,JSON.stringify(queue),now());
+  transaction(()=>{run('INSERT INTO study_sessions(id,owner_id,queue_json,created_at) VALUES(?,?,?,?)',id,user.id,JSON.stringify(queue),now());emitChange(user.id,'created','study',id);});
   res.status(201).json({id,total:queue.length});
 }));
 app.get('/api/v1/study/:id',handler((req,res)=>{
@@ -309,7 +408,7 @@ app.get('/api/v1/study/:id',handler((req,res)=>{
       const first=queue[session.position]!,ready=queue[next]!;
       queue[session.position]=ready;queue[next]=first;
       run('UPDATE study_sessions SET queue_json=?,revision=revision+1 WHERE id=? AND owner_id=?',JSON.stringify(queue),id,user.id);
-      revision++;
+      revision++;emitChange(user.id,'updated','study',id);
     }
     const current=queue[session.position];
     const card=current?query<CardRow>('SELECT * FROM cards WHERE id=? AND owner_id=? AND retired=0',current,user.id):undefined;
@@ -324,17 +423,23 @@ app.get('/api/v1/study/:id',handler((req,res)=>{
 app.post('/api/v1/study/:id/pause',handler((req,res)=>{
   const user=account(req),revision=Number(req.body?.revision);
   if(!Number.isSafeInteger(revision))throw new ApiError(400,'Invalid revision');
-  const changed=run("UPDATE study_sessions SET status='paused',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
-    String(req.params.id),user.id,revision);
-  if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+  transaction(()=>{
+    const changed=run("UPDATE study_sessions SET status='paused',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
+      String(req.params.id),user.id,revision);
+    if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+    emitChange(user.id,'updated','study',String(req.params.id));
+  });
   res.json({revision:revision+1,paused:true});
 }));
 app.post('/api/v1/study/:id/resume',handler((req,res)=>{
   const user=account(req),revision=Number(req.body?.revision);
   if(!Number.isSafeInteger(revision))throw new ApiError(400,'Invalid revision');
-  const changed=run("UPDATE study_sessions SET status='active',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
-    String(req.params.id),user.id,revision);
-  if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+  transaction(()=>{
+    const changed=run("UPDATE study_sessions SET status='active',revision=revision+1 WHERE id=? AND owner_id=? AND revision=?",
+      String(req.params.id),user.id,revision);
+    if(!changed.changes)throw new ApiError(409,'Session changed elsewhere');
+    emitChange(user.id,'updated','study',String(req.params.id));
+  });
   res.json({revision:revision+1,paused:false});
 }));
 app.post('/api/v1/study/:id/rate',handler((req,res)=>{
@@ -360,9 +465,10 @@ app.post('/api/v1/study/:id/rate',handler((req,res)=>{
     run('INSERT INTO review_events(id,owner_id,card_id,rating,created_at) VALUES(?,?,?,?,?)',operationId,user.id,cardId,rating,time);
     run('INSERT INTO review_undo(event_id,owner_id,session_id,card_id,before_json,queue_json,position,after_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
       operationId,user.id,id,cardId,before,session.queue_json,session.position,session.revision+1,time);
+    emitChange(user.id,'reviewed','card',cardId);
     if(rating===1)queue.push(cardId);
     run('UPDATE study_sessions SET queue_json=?,position=position+1,revision=revision+1 WHERE id=? AND owner_id=?',
-      JSON.stringify(queue),id,user.id);
+      JSON.stringify(queue),id,user.id);emitChange(user.id,'updated','study',id);
     return {duplicate:false,intervalMs,scheduler:FSRS_VERSION,revision:session.revision+1};
   });
   res.json(result);
@@ -386,7 +492,7 @@ app.post('/api/v1/study/:id/undo',handler((req,res)=>{
     run('UPDATE review_events SET undone_at=? WHERE id=? AND owner_id=?',now(),entry.event_id,user.id);
     run('UPDATE review_undo SET undone_at=? WHERE event_id=? AND owner_id=?',now(),entry.event_id,user.id);
     run('UPDATE study_sessions SET queue_json=?,position=?,revision=revision+1 WHERE id=? AND owner_id=?',
-      entry.queue_json,entry.position,id,user.id);
+      entry.queue_json,entry.position,id,user.id);emitChange(user.id,'undo','card',entry.card_id);emitChange(user.id,'updated','study',id);
     return {revision:session.revision+1,undone:true};
   });
   res.json(result);

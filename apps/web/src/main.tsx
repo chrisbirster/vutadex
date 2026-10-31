@@ -14,6 +14,45 @@ type Study = {card:{id:string;front:string;back:string;due_at:number}|null;posit
 type SessionState = {user:User|null;loading:boolean;error:string};
 type SessionContextValue={session:SessionState;refresh:()=>Promise<void>};
 const SessionContext=createContext<SessionContextValue|null>(null);
+const AccountChangeContext=createContext(0);
+function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>Promise<void>;children:React.ReactNode}){
+  const [state,setState]=useImmer({cursor:0,revision:0,connected:false});
+  useEffect(()=>{
+    if(!owner)return;
+    let closed=false,seq=0;
+    let stream:EventSource|null=null;
+    const catchup=async()=>{
+      try{
+        let more=true;
+        while(!closed&&more){
+          const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq);
+          if(response.changes.length)setState(d=>{d.revision++;});
+          seq=Math.max(seq,response.cursor);more=response.hasMore;
+        }
+        if(!closed)setState(d=>{d.connected=true;d.cursor=seq;});
+      }catch{if(!closed)setState(d=>{d.connected=false;});}
+    };
+    const setup=async()=>{
+      await catchup();if(closed)return;
+      stream=new EventSource('/api/v1/changes/stream?since='+seq);
+      stream.addEventListener('change',(event:Event)=>{
+        const data=JSON.parse((event as MessageEvent<string>).data) as {seq:number};
+        if(data.seq<=seq)return;
+        seq=data.seq;setState(d=>{d.cursor=seq;d.revision++;d.connected=true;});
+      });
+      stream.addEventListener('session-expired',()=>{stream?.close();void refresh();});
+      stream.onerror=()=>setState(d=>{d.connected=false;});
+      stream.onopen=()=>setState(d=>{d.connected=true;});
+    };
+    void setup();
+    const onFocus=()=>{void catchup();};
+    const onVisible=()=>{if(document.visibilityState==='visible')void catchup();};
+    window.addEventListener('focus',onFocus);
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{closed=true;stream?.close();window.removeEventListener('focus',onFocus);document.removeEventListener('visibilitychange',onVisible);};
+  },[owner,setState]);
+  return <AccountChangeContext.Provider value={state.revision}>{children}</AccountChangeContext.Provider>;
+}
 function useSession(){const value=useContext(SessionContext);if(!value)throw new Error('SessionProvider missing');return value;}
 async function api<T>(path:string, options?:{method?:string;body?:unknown;signal?:AbortSignal}):Promise<T>{
   const response=await fetch('/api/v1'+path,{method:options?.method||'GET',credentials:'same-origin',signal:options?.signal,headers:options?.body===undefined?{}:{'content-type':'application/json'},body:options?.body===undefined?undefined:JSON.stringify(options.body)});
@@ -23,6 +62,7 @@ async function api<T>(path:string, options?:{method?:string;body?:unknown;signal
   return payload as T;
 }
 function useResource<T>(url:string|null){
+  const changeRevision=useContext(AccountChangeContext);
   const [state,setState]=useImmer<{data:T|null;loading:boolean;error:string}>({data:null,loading:!!url,error:''});
   const [refresh,setRefresh]=useState(0);
   const owner=useSession().session.user?.id;
@@ -33,7 +73,7 @@ function useResource<T>(url:string|null){
     api<T>(url,{signal:controller.signal}).then(data=>{if(!controller.signal.aborted)setState({data,loading:false,error:''});})
       .catch((error:unknown)=>{if(!controller.signal.aborted)setState({data:null,loading:false,error:String(error)});});
     return ()=>controller.abort();
-  },[url,owner,refresh,setState]);
+  },[url,owner,refresh,setState,changeRevision]);
   return {...state,reload:()=>setRefresh(n=>n+1)};
 }
 const routeRoot=createRootRoute({component:Application,notFoundComponent:()=> <Empty title="Page not found" message="Bongo searched under the couch. Nothing there."/>});
@@ -84,7 +124,7 @@ function Application(){
   if(authPage)return <SessionContext.Provider value={{session,refresh}}><main className="auth-background"><Outlet/></main></SessionContext.Provider>;
   const signOut=async()=>{await api('/logout',{method:'POST'});setSession({user:null,loading:false,error:''});void navigate({to:'/login'});};
   return <SessionContext.Provider value={{session,refresh}}>
-    <div className="app">
+    <AccountSyncProvider owner={session.user?.id||''} refresh={refresh}><div className="app">
       <aside className={'sidebar '+(mobileNav?'sidebar-open':'')}>
         <div className="brand"><div className="brand-mark"><Layers3 size={27}/></div><div><strong>Vutadex</strong><small>Memories that actually stick<br/>(and occasionally make you laugh)</small></div></div>
         <nav aria-label="Main navigation">{NAV.map(item=><Link key={item.label} to={item.to} activeOptions={{exact:item.to==='/'}} className="nav-link" activeProps={{className:'nav-link active'}}><item.icon size={21} strokeWidth={2.3}/><span>{item.label}</span></Link>)}</nav>
@@ -95,7 +135,7 @@ function Application(){
         <header className="topbar"><button className="mobile-menu icon-button" aria-label="Open navigation" onClick={()=>setMobileNav(true)}><Menu/></button><Link to="/" className="mobile-logo">Vutadex</Link><div className="search-shell"><Search size={20}/><input aria-label="Find decks" placeholder="Search decks, cards, or existential questions..." onKeyDown={e=>{if(e.key==='Enter'&&e.currentTarget.value.trim())void navigate({to:'/decks',search:undefined});}}/><kbd>⌘ K</kbd></div><div className="avatar"><div className="avatar-cat"><Bongo/></div><div><strong>{session.user?.email.split('@')[0]||'Learner'}</strong><small>More cards. Less forgetting.</small></div></div><button className="icon-button logout" onClick={()=>void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={19}/></button></header>
         <main className="content"><Outlet/></main>
       </div>
-    </div>
+    </div></AccountSyncProvider>
   </SessionContext.Provider>;
 }
 function Empty({title,message,action}:{title:string;message:string;action?:React.ReactNode}){return <div className="empty card"><Bongo mood="thinking"/><h2>{title}</h2><p>{message}</p>{action}</div>;}
@@ -120,9 +160,36 @@ function DecksPage(){const {data,loading,error}=useResource<{decks:Deck[]}>('/de
 function NewDeckPage(){const [form,setForm]=useImmer({name:'',description:''});const [error,setError]=useState('');const [busy,setBusy]=useState(false);const navigate=useNavigate();async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{const r=await api<{deck:{id:string}}>('/decks',{method:'POST',body:form});void navigate({to:'/decks/$deckId',params:{deckId:r.deck.id}});}catch(e){setError(String(e));}finally{setBusy(false);}}return <><Heading title="Create a New Deck" subtitle="A place for your questionable amount of knowledge."/><form className="card form-card" onSubmit={e=>void submit(e)}><label>Deck name<input required maxLength={120} value={form.name} onChange={e=>setForm(d=>{d.name=e.target.value;})} placeholder="e.g. Philosophy, TypeScript, Cats"/></label><label>Description (optional)<textarea maxLength={500} value={form.description} onChange={e=>setForm(d=>{d.description=e.target.value;})} placeholder="What are we learning?"/></label><Notice text={error}/><button className="primary" disabled={busy}>{busy?'Creating...':'Create Deck'}</button></form></>;}
 function DeckDetailPage(){const {deckId}=routeDeckDetail.useParams();const {data,loading,error}=useResource<{deck:Deck;notes:Note[]}>('/decks/'+encodeURIComponent(deckId));const navigate=useNavigate();if(loading)return <Loading/>;if(error)return <Notice text={error}/>;const deck=data!.deck;return <><Heading title={deck.name} subtitle={deck.description||'Every card counts.'}/><div className="actions"><Link className="button primary" to="/cards/new" search={{deckId}}><Plus/> Add Cards</Link><button className="secondary" onClick={()=>void startStudy(navigate,deckId)}><Play/> Study Deck</button><a className="button secondary" href={"/api/v1/decks/"+encodeURIComponent(deckId)+"/export"}><Download/> Export .deck</a></div><div className="section-heading"><h2>Notes ({data!.notes.length})</h2></div>{data!.notes.length?<div className="notes-list">{data!.notes.map(n=><div className="note-row card" key={n.id}><div><small className="pill">{n.type}</small><h3>{n.front}</h3><p>{n.back||'Cloze card'}</p><small>{n.tags}</small><div className="actions"><Link className="button secondary" to="/notes/$noteId/edit" params={{noteId:n.id}}>Edit Note</Link></div></div></div>)}</div>:<Empty title="No cards yet" message="Feed the knowledge goblin with your first note." action={<Link className="button primary" to="/cards/new" search={{deckId}}>Add Cards</Link>}/>}</>;}
 function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,loading}=useResource<{decks:Deck[]}>('/decks');const [form,setForm]=useImmer({deckId:deckId||'',type:'basic',front:'',back:'',tags:''});const [error,setError]=useState('');const [message,setMessage]=useState('');const [busy,setBusy]=useState(false);
+  const draft=useResource<{draft:{deckId:string;type:string;front:string;back:string;tags:string;revision:number}|null}>('/drafts/new');
+  const [draftReady,setDraftReady]=useState(false),[draftRevision,setDraftRevision]=useState(0);
+  const [draftStatus,setDraftStatus]=useState('Loading draft...'),[draftConflict,setDraftConflict]=useState(false);
+  const lastSaved=useRef(''),saving=useRef(false);
+  useEffect(()=>{
+    if(draftReady||draft.loading)return;
+    const value=draft.data?.draft;
+    if(value){const restored={deckId:deckId||value.deckId,type:value.type,front:value.front,back:value.back,tags:value.tags};
+      setForm(restored);lastSaved.current=JSON.stringify(restored);setDraftRevision(value.revision);setDraftStatus('Draft restored');}
+    else {lastSaved.current=JSON.stringify(form);setDraftRevision(0);setDraftStatus('Draft ready');}
+    setDraftReady(true);setDraftConflict(false);
+  },[draftReady,draft.loading,draft.data,deckId,setForm]);
+  useEffect(()=>{
+    if(!draftReady||draftConflict||busy)return;
+    const serialized=JSON.stringify(form);
+    if(serialized===lastSaved.current)return;
+    const timeout=window.setTimeout(()=>{
+      if(saving.current)return;
+      saving.current=true;setDraftStatus('Saving draft...');
+      void api<{revision:number}>('/drafts/new',{method:'PUT',body:{...form,revision:draftRevision}})
+        .then(result=>{lastSaved.current=serialized;setDraftRevision(result.revision);setDraftStatus('Draft saved across devices');})
+        .catch(error=>{setDraftConflict(true);setDraftStatus(String(error));})
+        .finally(()=>{saving.current=false;});
+    },650);
+    return()=>window.clearTimeout(timeout);
+  },[form,draftRevision,draftReady,draftConflict,busy]);
+
   useEffect(()=>{if(deckId)setForm(s=>{s.deckId=deckId;});},[deckId,setForm]);
-  async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{const result=await api<{generatedCards:number}>('/notes',{method:'POST',body:form});setMessage('Saved! '+result.generatedCards+' card(s) ready to study.');setForm(s=>{s.front='';s.back='';s.tags='';});}catch(e){setError(String(e));}finally{setBusy(false);}}
-  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{(['basic','reverse','cloze'] as const).map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><div className="field-grid"><label>{form.type==='cloze'?'Text with {{c1::answer}}':'Front'}<textarea required maxLength={6000} rows={6} placeholder={form.type==='cloze'?'The {{c1::capital}} of France is Paris.':'What is the question?'} value={form.front} onChange={e=>setForm(s=>{s.front=e.target.value;})}/></label><label>{form.type==='cloze'?'Extra (optional)':'Back'}<textarea required={form.type!=='cloze'} maxLength={6000} rows={6} placeholder="What's the answer?" value={form.back} onChange={e=>setForm(s=>{s.back=e.target.value;})}/></label></div><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><Notice text={error}/>{message&&<div className="success" role="status">{message}</div>}<button disabled={busy} className="primary"><Sparkles size={18}/> {busy?'Saving...':'Save Card'}</button></form><aside className="editor-side"><div className="card preview"><h3><Eye size={20}/> Live Preview</h3><div className="preview-front">{form.front||'Your card front will appear here...'}</div><div className="preview-back">{form.back||'Your answer will appear here...'}</div><Bongo mood="happy"/></div><div className="card"><h3><CircleHelp size={20}/> Card Writing Tips</h3><p>One idea per card. Short, specific questions stick.</p><p>Use your own words. Future you says thanks.</p><p>Cloze example: <code>{'{{c1::answer}}'}</code>.</p></div></aside></div></>;
+  async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{const result=await api<{generatedCards:number}>('/notes',{method:'POST',body:form});setMessage('Saved! '+result.generatedCards+' card(s) ready to study.');setForm(s=>{s.front='';s.back='';s.tags='';});const cleared={...form,front:'',back:'',tags:''};lastSaved.current=JSON.stringify(cleared);if(draftRevision>0){void api('/drafts/new',{method:'DELETE',body:{revision:draftRevision}}).then(()=>{setDraftRevision(0);setDraftStatus('Card saved. Draft cleared.');}).catch(()=>{setDraftConflict(true);setDraftStatus('Card saved, but the draft changed elsewhere. Reload before editing again.');});}}catch(e){setError(String(e));}finally{setBusy(false);}}
+  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{(['basic','reverse','cloze'] as const).map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><div className="field-grid"><label>{form.type==='cloze'?'Text with {{c1::answer}}':'Front'}<textarea required maxLength={6000} rows={6} placeholder={form.type==='cloze'?'The {{c1::capital}} of France is Paris.':'What is the question?'} value={form.front} onChange={e=>setForm(s=>{s.front=e.target.value;})}/></label><label>{form.type==='cloze'?'Extra (optional)':'Back'}<textarea required={form.type!=='cloze'} maxLength={6000} rows={6} placeholder="What's the answer?" value={form.back} onChange={e=>setForm(s=>{s.back=e.target.value;})}/></label></div><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&<button type="button" className="secondary" onClick={()=>{setDraftReady(false);draft.reload();}}>Reload Server Draft (discards local edits)</button>}<Notice text={error}/>{message&&<div className="success" role="status">{message}</div>}<button disabled={busy} className="primary"><Sparkles size={18}/> {busy?'Saving...':'Save Card'}</button></form><aside className="editor-side"><div className="card preview"><h3><Eye size={20}/> Live Preview</h3><div className="preview-front">{form.front||'Your card front will appear here...'}</div><div className="preview-back">{form.back||'Your answer will appear here...'}</div><Bongo mood="happy"/></div><div className="card"><h3><CircleHelp size={20}/> Card Writing Tips</h3><p>One idea per card. Short, specific questions stick.</p><p>Use your own words. Future you says thanks.</p><p>Cloze example: <code>{'{{c1::answer}}'}</code>.</p></div></aside></div></>;
 }
 
 function EditNotePage(){

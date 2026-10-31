@@ -213,3 +213,74 @@ test('M5 Again retries remain in durable session instead of double-counting',asy
   const after=await (await request('/study/'+id,'GET',undefined,a.cookie)).json() as {total:number;position:number;waiting:number};
   assert.equal(after.total,2);assert.equal(after.position,1);assert.ok(after.waiting>0);
 });
+
+test('M6 same-account device cursors converge and other accounts cannot read changes',async()=>{
+  const first=await session('m6-devices@example.com'),second=await session('m6-devices@example.com'),outsider=await session('m6-outsider@example.com');
+  assert.equal(first.user.id,second.user.id);
+  const empty=await (await request('/changes?since=0','GET',undefined,second.cookie)).json() as {cursor:number;changes:unknown[]};
+  const made=await request('/decks','POST',{name:'M6 shared deck'},first.cookie);assert.equal(made.status,201);
+  const id=(await made.json() as {deck:{id:string}}).deck.id;
+  const change=await (await request('/changes?since='+empty.cursor,'GET',undefined,second.cookie)).json() as {cursor:number;changes:{kind:string;resource:string;resource_id:string}[]};
+  assert.ok(change.changes.some(e=>e.kind==='created'&&e.resource==='deck'&&e.resource_id===id));
+  const privateChanges=await (await request('/changes?since=0','GET',undefined,outsider.cookie)).json() as {changes:unknown[]};
+  assert.equal(privateChanges.changes.length,0);
+  const created=await request('/notes','POST',{deckId:id,type:'basic',front:'Original',back:'One',tags:''},first.cookie);
+  const noteId=(await created.json() as {note:{id:string}}).note.id;
+  const changed=await request('/notes/'+noteId,'PUT',{type:'basic',front:'Changed on A',back:'One',tags:'',revision:0},first.cookie);
+  assert.equal(changed.status,200);
+  const stale=await request('/notes/'+noteId,'PUT',{type:'basic',front:'Stale B',back:'Two',tags:'',revision:0},second.cookie);
+  assert.equal(stale.status,409);
+  const current=await (await request('/notes/'+noteId,'GET',undefined,second.cookie)).json() as {note:{front:string}};
+  assert.equal(current.note.front,'Changed on A');
+  const increment=await request('/changes?since='+change.cursor,'GET',undefined,second.cookie);
+  assert.equal(increment.status,200);
+  assert.ok(((await increment.json()) as {changes:unknown[]}).changes.length>=2);
+  assert.equal((await request('/changes?since=-1','GET',undefined,second.cookie)).status,400);
+});
+test('M6 authenticated SSE stream replays owned changes and terminates on abort',async()=>{
+  const user=await session('m6-stream@example.com');
+  const created=await request('/decks','POST',{name:'M6 Stream'},user.cookie);
+  assert.equal(created.status,201);
+  const controller=new AbortController();
+  const response=await fetch(base+'/api/v1/changes/stream?since=0',{headers:{Cookie:user.cookie},signal:controller.signal});
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-type')||'',/text\/event-stream/);
+  const reader=response.body!.getReader(),decoder=new TextDecoder();
+  let content='';
+  const started=Date.now();
+  try{
+    while(!content.includes('event: change')&&Date.now()-started<5000){
+      const chunk=await reader.read();
+      if(chunk.done)break;
+      content+=decoder.decode(chunk.value);
+    }
+    assert.match(content,/event: change/);
+    assert.match(content,/"resource":"deck"/);
+  }finally{controller.abort();}
+  const outsider=await request('/changes/stream','GET');
+  assert.equal(outsider.status,401);
+});
+
+test('M6 drafts persist across devices with optimistic revision conflicts and ownership',async()=>{
+  const one=await session('m6-draft@example.com');
+  const two=await session('m6-draft@example.com');
+  const other=await session('m6-draft-other@example.com');
+  const empty=await request('/drafts/new','GET',undefined,one.cookie);
+  assert.equal((await empty.json() as {draft:unknown}).draft,null);
+  const draft={deckId:'',type:'basic',front:'Unsaved question',back:'Unsaved answer',tags:'one'};
+  const created=await request('/drafts/new','PUT',{...draft,revision:0},one.cookie);
+  assert.equal(created.status,200);
+  assert.equal((await created.json() as {revision:number}).revision,1);
+  const seen=await (await request('/drafts/new','GET',undefined,two.cookie)).json() as {draft:{front:string;revision:number}};
+  assert.equal(seen.draft.front,'Unsaved question');
+  assert.equal((await request('/drafts/new','PUT',{...draft,front:'Stale',revision:0},two.cookie)).status,409);
+  assert.equal((await request('/drafts/new','GET',undefined,other.cookie).then(r=>r.json()) as {draft:unknown}).draft,null);
+  const updated=await request('/drafts/new','PUT',{...draft,front:'Updated by A',revision:1},one.cookie);
+  assert.equal(updated.status,200);
+  const newRevision=(await updated.json() as {revision:number}).revision;
+  assert.equal((await request('/drafts/new','DELETE',{revision:1},two.cookie)).status,409);
+  assert.equal((await request('/drafts/new','DELETE',{revision:newRevision},one.cookie)).status,200);
+  assert.equal((await request('/drafts/new','GET',undefined,two.cookie).then(r=>r.json()) as {draft:unknown}).draft,null);
+  const feed=await (await request('/changes?since=0','GET',undefined,two.cookie)).json() as {changes:{resource:string;kind:string}[]};
+  assert.ok(feed.changes.some(e=>e.resource==='draft'&&e.kind==='deleted'));
+});
