@@ -36,3 +36,31 @@ jobs:
             apps/web/playwright-report/
             apps/web/test-results/
           retention-days: 7
+
+  cross-browser:
+    name: Firefox + WebKit E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run web:check
+      - name: Install pinned Playwright and axe (test-only, no lockfile edits)
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund @playwright/test@1.56.1 @axe-core/playwright@4.10.2
+      - run: npx playwright test -c apps/web/playwright.config.mjs --project=firefox --project=webkit
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cross-browser-debug
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
