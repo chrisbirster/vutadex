@@ -1,5 +1,9 @@
 # Vutadex roadmap — v1.0.0 release candidate
 
+This document tracks the CLI release. The new React/TypeScript web application
+has a separate [milestone and task plan](web-app-plan.md) using TanStack Router,
+use-immer, Express, Pino and magic-link sessions.
+
 Branch flow: feature/* → dev → main. CI must pass on Ubuntu, macOS and Windows; use regular merge commits to preserve ancestry. A version in dev is **not a published release**.
 
 ## Completed foundations (M0–M5)
