@@ -23,10 +23,20 @@
     "check": "npm run typecheck && npm run lint && npm test",
     "lint": "node --experimental-strip-types scripts/style.ts --check",
     "format": "node --experimental-strip-types scripts/style.ts --write",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=100 --test-coverage-include-all --test-coverage-include=commands/**/*.ts --test-coverage-include=database/*.ts --test-coverage-include=fsrs/*.ts --test-coverage-include=services/*.ts --test-coverage-include=utils/*.ts --test-coverage-include=index.ts --test-coverage-include=constants.ts test/*.test.ts"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=100 --test-coverage-include-all --test-coverage-include=commands/**/*.ts --test-coverage-include=database/*.ts --test-coverage-include=fsrs/*.ts --test-coverage-include=services/*.ts --test-coverage-include=utils/*.ts --test-coverage-include=index.ts --test-coverage-include=constants.ts test/*.test.ts",
+    "terminal": "npm run start --workspace @vutadex/terminal --",
+    "terminal:check": "npm run check",
+    "web:dev": "npm run dev --workspace @vutadex/web",
+    "web:build": "npm run build --workspace @vutadex/web",
+    "web:test": "npm run test --workspace @vutadex/web",
+    "web:check": "npm run typecheck --workspace @vutadex/web && npm run test --workspace @vutadex/web && npm run build --workspace @vutadex/web"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "typescript": "5.9.3"
-  }
+  },
+  "workspaces": [
+    "apps/terminal",
+    "apps/web"
+  ]
 }

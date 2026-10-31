@@ -1,0 +1,27 @@
+name: Web App
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'apps/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/web-app.yml'
+permissions:
+  contents: read
+jobs:
+  web:
+    name: Web + terminal compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run web:check
+      - run: npm run terminal:check
+      - run: npm run build
+      - run: node --test test/packaged-cli.verify.ts test/package-manifest.verify.ts
