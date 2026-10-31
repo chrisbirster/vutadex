@@ -19,16 +19,16 @@ try{
   const db=new DatabaseSync(join(tmp,'perf.db'));
   db.exec('CREATE TABLE cards(id INTEGER PRIMARY KEY,owner_id TEXT NOT NULL,due_at INTEGER NOT NULL,front TEXT NOT NULL);CREATE INDEX cards_due ON cards(owner_id,due_at);BEGIN IMMEDIATE');
   const add=db.prepare('INSERT INTO cards(owner_id,due_at,front) VALUES(?,?,?)');
-  for(let i=0;i<30000;i++)add.run(i%3?'account-a':'account-b',i%10000,'Card '+i);
+  for(let i=0;i<120000;i++)add.run(i%3?'account-a':'account-b',i%10000,'Card '+i);
   db.exec('COMMIT');
   const plan=db.prepare('EXPLAIN QUERY PLAN SELECT id FROM cards WHERE owner_id=? AND due_at<=? ORDER BY due_at LIMIT 100')
     .all('account-a',9999) as {detail:string}[];
   if(!plan.some(x=>/USING (COVERING )?INDEX/i.test(x.detail)))throw new Error('Due-card query must use owner/due index: '+JSON.stringify(plan));
   const q=db.prepare('SELECT id FROM cards WHERE owner_id=? AND due_at<=? ORDER BY due_at LIMIT 100');
   const start=performance.now();
-  for(let i=0;i<300;i++)q.all('account-a',5000);
+  for(let i=0;i<750;i++)q.all('account-a',5000);
   const elapsed=performance.now()-start;
-  if(elapsed>5000)throw new Error('Due-card query workload exceeded 5s');
+  if(elapsed>10000)throw new Error('Due-card query workload exceeded 10s');
   db.close();
-  console.log(JSON.stringify({gzipJsBytes:js,gzipCssBytes:css,seededCards:30000,dueQueryRuns:300,elapsedMs:Math.round(elapsed)},null,2));
+  console.log(JSON.stringify({gzipJsBytes:js,gzipCssBytes:css,seededCards:120000,dueQueryRuns:750,elapsedMs:Math.round(elapsed)},null,2));
 }finally{rmSync(tmp,{recursive:true,force:true});}

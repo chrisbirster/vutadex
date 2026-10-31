@@ -129,3 +129,48 @@ test('reconnecting a temporarily offline device catches up without a second acco
     await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
   }finally{await a.close();await b.close();}
 });
+
+test('typed-answer interaction compares learner text and retains self-rating',async({page})=>{
+  await signIn(page,unique('typed-review'));
+  const origin='http://127.0.0.1:5173';
+  const deckResponse=await page.request.post('/api/v1/decks',{headers:{Origin:origin},data:{name:'Typed E2E '+Date.now()}});
+  expect(deckResponse.status()).toBe(201);
+  const deckId=(await deckResponse.json()).deck.id;
+  const created=await page.request.post('/api/v1/notes',{headers:{Origin:origin},
+    data:{deckId,type:'type-answer',fields:['Capital of France?','Paris'],tags:''}});
+  expect(created.status()).toBe(201);
+  const started=await page.request.post('/api/v1/study',{headers:{Origin:origin},data:{deckId}});
+  expect(started.status()).toBe(201);
+  const sessionId=(await started.json()).id;
+  await page.goto('/study/'+sessionId);
+  await expect(page.getByLabel('Type your answer')).toBeVisible();
+  await page.getByLabel('Type your answer').fill('  PARIS  ');
+  await page.getByLabel('Type your answer').press('Enter');
+  await expect(page.getByText(/matches after whitespace and case/)).toBeVisible();
+  await page.getByRole('button',{name:/Good/}).click();
+  await expect(page.getByRole('heading',{name:'Brain gains secured!'})).toBeVisible();
+});
+test('occlusion review displays owned image, hides region and reveals target on demand',async({page})=>{
+  await signIn(page,unique('occlusion-review'));
+  const origin='http://127.0.0.1:5173';
+  const image='iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAc0lEQVR42u3ZMQ3AIBBAUdpgpB6Q0gU/+GDETD3UChpuIC3J+/slvHATHHdvaefOtHkAAAAAAAAAAAAA35WjA894lx6o1MsKAQAAAAAAAAAAAAAAAAAAAAAAAAAAAKwt/D8Qfb93AwAAAAAAAAAAAAC/bQIgwgWpF3i3xQAAAABJRU5ErkJggg==';
+  const media=await page.request.post('/api/v1/media',{headers:{Origin:origin},data:{data:image}});
+  expect(media.status()).toBe(201);
+  const {ref}=await media.json();
+  const deck=await page.request.post('/api/v1/decks',{headers:{Origin:origin},data:{name:'Occlusion E2E '+Date.now()}});
+  const {deck:{id:deckId}}=await deck.json();
+  const masks=JSON.stringify([{id:3,x:0.1,y:0.1,width:0.4,height:0.4,answer:'Bongo'}]);
+  const note=await page.request.post('/api/v1/notes',{headers:{Origin:origin},
+    data:{deckId,type:'image-occlusion',fields:[ref,masks,''],tags:''}});
+  expect(note.status()).toBe(201);
+  const session=await page.request.post('/api/v1/study',{headers:{Origin:origin},data:{deckId}});
+  const {id}=await session.json();
+  await page.goto('/study/'+id);
+  await expect(page.getByRole('img',{name:'Masked region to identify'})).toBeVisible();
+  const imageElement=page.getByAltText('Study image with occluded regions');
+  await expect(imageElement).toBeVisible();
+  expect(await imageElement.evaluate(image=>image.naturalWidth)).toBeGreaterThan(0);
+  await page.getByRole('button',{name:/Show Answer/}).click();
+  await expect(page.getByRole('img',{name:'Revealed target region'})).toBeVisible();
+  await expect(page.getByText('Bongo',{exact:true})).toBeVisible();
+});
