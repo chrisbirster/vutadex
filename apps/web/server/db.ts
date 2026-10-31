@@ -52,3 +52,8 @@ db.exec("CREATE TABLE IF NOT EXISTS account_drafts (owner_id TEXT NOT NULL REFER
 addColumn('notes','fields_json',"fields_json TEXT");
 
 db.exec("CREATE TABLE IF NOT EXISTS media_blobs (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, sha256 TEXT NOT NULL, mime TEXT NOT NULL, bytes BLOB NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(owner_id,sha256));");
+
+db.exec(
+  "CREATE TABLE IF NOT EXISTS legacy_migrations (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, source_id TEXT NOT NULL, checksum TEXT NOT NULL, summary_json TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(owner_id,source_id));"+
+  "CREATE TABLE IF NOT EXISTS legacy_raw_events (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, source_id TEXT NOT NULL, original_event_id INTEGER NOT NULL, mapped_card_id TEXT NOT NULL REFERENCES cards(id), raw_json TEXT NOT NULL, PRIMARY KEY(owner_id,source_id,original_event_id));"
+);

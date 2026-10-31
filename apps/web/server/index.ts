@@ -7,6 +7,7 @@ import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
 import { MediaError, parseBase64Media, refHash } from './media.ts';
+import { MigrationError, parseHistory, parseDate, stableId, type HistoryBundle } from './history.ts';
 import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex, accountDayKey } from './study-policy.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
@@ -394,6 +395,86 @@ app.get('/api/v1/decks/:id/export',handler((req,res)=>{
   res.send(serializeDeckFile({name:deck.name,notes}));
 }));
 
+
+app.post('/api/v1/migration/full/preview',handler((req,res)=>{
+  const user=account(req);void user;
+  const report=parseHistory(req.body?.bundle);
+  res.json({sourceId:report.bundle.sourceId,checksum:report.checksum,summary:report.summary,
+    warning:'Full-history import must be explicitly confirmed while signed in. Existing account content is not replaced.'});
+}));
+app.get('/api/v1/migration/full/:sourceId',handler((req,res)=>{
+  const user=account(req),sourceId=required(req.params.sourceId,'source ID',64);
+  const record=query<{source_id:string;checksum:string;summary_json:string;created_at:number}>(
+    'SELECT source_id,checksum,summary_json,created_at FROM legacy_migrations WHERE owner_id=? AND source_id=?',user.id,sourceId);
+  if(!record)throw new ApiError(404,'Migration not found');
+  res.json({sourceId:record.source_id,checksum:record.checksum,summary:JSON.parse(record.summary_json),createdAt:record.created_at});
+}));
+app.post('/api/v1/migration/full/commit',handler((req,res)=>{
+  const user=account(req);
+  if(req.body?.confirmation!=='IMPORT_MY_HISTORY')throw new ApiError(400,'Explicit confirmation is required');
+  const parsed=parseHistory(req.body?.bundle),b=parsed.bundle;
+  const result=transaction(()=>{
+    const existing=query<{checksum:string;summary_json:string}>('SELECT checksum,summary_json FROM legacy_migrations WHERE owner_id=? AND source_id=?',user.id,b.sourceId);
+    if(existing){
+      if(existing.checksum!==parsed.checksum)throw new ApiError(409,'This source has already been imported from a different snapshot');
+      return {duplicate:true,sourceId:b.sourceId,summary:JSON.parse(existing.summary_json)};
+    }
+    const names=new Set<string>();
+    for(const deck of b.decks){
+      const newId=stableId(user.id,b.sourceId,'deck',deck.id);
+      let name=('CLI '+b.sourceId+' '+deck.id+' '+deck.name).slice(0,120);
+      if(names.has(name))name='CLI '+b.sourceId+' '+deck.id;
+      names.add(name);
+      run('INSERT INTO decks(id,owner_id,name,description,created_at) VALUES(?,?,?,?,?)',
+        newId,user.id,name,(deck.description||'').slice(0,500),now());
+      emitChange(user.id,'created','deck',newId);
+    }
+    for(const note of b.notes){
+      const item=parsed.notes.get(note.id)!;
+      const noteId=stableId(user.id,b.sourceId,'note',note.id);
+      run('INSERT INTO notes(id,deck_id,owner_id,type,front,back,tags,fields_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+        noteId,stableId(user.id,b.sourceId,'deck',note.deckId),user.id,item.type,item.front,item.back,item.tags,JSON.stringify(item.fields),now());
+      emitChange(user.id,'created','note',noteId);
+    }
+    for(const card of b.cards){
+      const cardId=stableId(user.id,b.sourceId,'card',card.id);
+      const deckId=stableId(user.id,b.sourceId,'deck',card.deckId);
+      let noteId=card.noteId===null?stableId(user.id,b.sourceId,'manual-note',card.id):
+        stableId(user.id,b.sourceId,'note',card.noteId);
+      if(card.noteId===null){
+        run('INSERT INTO notes(id,deck_id,owner_id,type,front,back,tags,fields_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+          noteId,deckId,user.id,'basic',card.front,card.back,'',JSON.stringify([card.front,card.back]),now());
+        emitChange(user.id,'created','note',noteId);
+      }
+      const scheduled=b.schedules.find(row=>row.cardId===card.id);
+      const variant=card.key===null?'front':card.key.replace(/^note:\d+:/,'');
+      run('INSERT INTO cards(id,note_id,deck_id,owner_id,variant,front,back,due_at,stability,difficulty,fast_stability,last_review_at,review_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        cardId,noteId,deckId,user.id,variant,card.front,card.back,scheduled?parseDate(scheduled.dueAt):now(),
+        scheduled?.stability??null,scheduled?.difficulty??null,scheduled?.fastStability??null,
+        scheduled?parseDate(scheduled.lastReviewAt):null,scheduled?.reviewCount??0);
+    }
+    for(const event of b.events){
+      const cardId=stableId(user.id,b.sourceId,'card',event.cardId);
+      run('INSERT INTO legacy_raw_events(owner_id,source_id,original_event_id,mapped_card_id,raw_json) VALUES(?,?,?,?,?)',
+        user.id,b.sourceId,event.id,cardId,JSON.stringify(event.raw));
+      if(event.eventType==='review'){
+        run('INSERT INTO review_events(id,owner_id,card_id,rating,created_at) VALUES(?,?,?,?,?)',
+          stableId(user.id,b.sourceId,'review',event.id),user.id,cardId,event.rating!,parseDate(event.occurredAt));
+      }
+    }
+    for(const event of b.events){
+      if(event.eventType!=='undo')continue;
+      run('UPDATE review_events SET undone_at=? WHERE owner_id=? AND id=?',
+        parseDate(event.occurredAt),user.id,stableId(user.id,b.sourceId,'review',event.undoneReviewId!));
+    }
+    run('INSERT INTO legacy_migrations(owner_id,source_id,checksum,summary_json,created_at) VALUES(?,?,?,?,?)',
+      user.id,b.sourceId,parsed.checksum,JSON.stringify(parsed.summary),now());
+    emitChange(user.id,'imported','migration',b.sourceId);
+    return {duplicate:false,sourceId:b.sourceId,summary:parsed.summary};
+  });
+  res.status(result.duplicate?200:201).json(result);
+}));
+
 app.get('/api/v1/preferences',handler((req,res)=>{
   const user=account(req);
   const pref=query<{timezone:string}>('SELECT timezone FROM user_preferences WHERE user_id=?',user.id);
@@ -566,7 +647,7 @@ const dist=resolve(import.meta.dirname,'../dist');
 if (existsSync(dist)) {app.use(express.static(dist));app.get('/{*path}',(_req,res)=>res.sendFile(resolve(dist,'index.html')));}
 app.use((err:unknown,_req:Request,res:Response,_next:NextFunction)=>{
   const status=err instanceof ApiError?err.status:500;
-  if(err instanceof ContentError||err instanceof MediaError){res.status(400).json({error:err.message});return;}
+  if(err instanceof ContentError||err instanceof MediaError||err instanceof MigrationError){res.status(400).json({error:err.message});return;}
   if(status===500)logger.error({name:err instanceof Error?err.name:'Error'},'request failed');
   res.status(status).json({error:status===500?'Unexpected server error':(err as Error).message});
 });

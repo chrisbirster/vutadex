@@ -12,7 +12,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "inspect:legacy": "node --experimental-strip-types scripts/legacy-inspect.ts"
+    "inspect:legacy": "node --experimental-strip-types scripts/legacy-inspect.ts",
+    "export:legacy-history": "node --experimental-strip-types scripts/export-history.ts"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.131.0",
