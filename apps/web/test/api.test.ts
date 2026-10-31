@@ -102,3 +102,28 @@ test('account ownership, note generation and idempotent rated session',async()=>
   const other=await (await request('/overview','GET',undefined,beta.cookie)).json() as {cards:number};
   assert.equal(other.cards,0);
 });
+
+test('one-time magic link cannot be replayed and supports explicit revocation', async()=>{
+  const email='replay@example.com';
+  assert.equal((await request('/auth/magic-links','POST',{email})).status,200);
+  const items=await (await request('/dev/inbox')).json() as {email:string;link:string}[];
+  const u=new URL(items.at(-1)!.link);
+  const secret=new URLSearchParams(u.hash.slice(1)).get('token');
+  assert.ok(secret);
+  const first=await request('/auth/magic-links/consume','POST',{token:secret});
+  assert.equal(first.status,200);
+  const repeated=await request('/auth/magic-links/consume','POST',{token:secret});
+  assert.equal(repeated.status,400);
+  const cookie=first.headers.get('set-cookie')!.split(';')[0]!;
+  const entries=await (await request('/sessions','GET',undefined,cookie)).json() as {sessions:{id:string}[]};
+  assert.ok(entries.sessions.length);
+  const revoked=await request('/sessions/revoke','POST',{id:entries.sessions[0]!.id},cookie);
+  assert.equal(revoked.status,200);
+  assert.equal((await request('/session','GET',undefined,cookie)).status,401);
+});
+test('email local part is not rewritten and domain is canonicalized',async()=>{
+  const email='Test+one@EXAMPLE.com';
+  assert.equal((await request('/auth/magic-links','POST',{email})).status,200);
+  const items=await (await request('/dev/inbox')).json() as {email:string;link:string}[];
+  assert.equal(items.at(-1)!.email,'Test+one@example.com');
+});

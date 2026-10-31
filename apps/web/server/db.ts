@@ -23,3 +23,6 @@ export function transaction<T>(work: () => T): T {
   try { const result = work(); db.exec('COMMIT'); return result; }
   catch (error) { db.exec('ROLLBACK'); throw error; }
 }
+
+db.exec("CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);");
+db.exec("CREATE INDEX IF NOT EXISTS challenges_email ON challenges(email,expires_at);");
