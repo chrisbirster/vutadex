@@ -46,3 +46,5 @@ db.exec(
   "CREATE TABLE IF NOT EXISTS account_changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL, resource TEXT NOT NULL, resource_id TEXT NOT NULL, created_at INTEGER NOT NULL);"+
   "CREATE INDEX IF NOT EXISTS account_changes_owner_seq ON account_changes(owner_id,seq);"
 );
+
+db.exec("CREATE TABLE IF NOT EXISTS account_drafts (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, draft_key TEXT NOT NULL, payload_json TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(owner_id,draft_key));");

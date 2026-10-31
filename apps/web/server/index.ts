@@ -154,6 +154,58 @@ function changes(owner:string,since:number,limit:number){
   const rows=found.slice(0,limit);
   return {changes:rows,cursor:rows.at(-1)?.seq??since,hasMore:found.length>limit};
 }
+
+function draftKey(value:unknown):string {
+  const key=required(value,'draft key',80);
+  if(!/^[a-z0-9-]+$/.test(key))throw new ApiError(400,'Invalid draft key');
+  return key;
+}
+function draftInput(value:unknown):{deckId:string;type:string;front:string;back:string;tags:string}{
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new ApiError(400,'Invalid draft');
+  const body=value as Record<string,unknown>,result:{[k:string]:string}={};
+  for(const [key,max] of [['deckId',100],['type',30],['front',6000],['back',6000],['tags',300]] as const){
+    const x=body[key]??'';
+    if(typeof x!=='string'||x.length>max||x.includes('\0'))throw new ApiError(400,'Invalid draft '+key);
+    result[key]=x;
+  }
+  if(result.type && !['basic','reverse','cloze'].includes(result.type))throw new ApiError(400,'Unsupported draft type');
+  return result as {deckId:string;type:string;front:string;back:string;tags:string};
+}
+app.get('/api/v1/drafts/:key',handler((req,res)=>{
+  const user=account(req),key=draftKey(req.params.key);
+  const row=query<{payload_json:string;revision:number;updated_at:number}>(
+    'SELECT payload_json,revision,updated_at FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+  res.json({draft:row?{...JSON.parse(row.payload_json),revision:row.revision,updatedAt:row.updated_at}:null});
+}));
+app.put('/api/v1/drafts/:key',handler((req,res)=>{
+  const user=account(req),key=draftKey(req.params.key),expected=Number(req.body?.revision);
+  if(!Number.isSafeInteger(expected)||expected<0)throw new ApiError(400,'Invalid revision');
+  const payload=draftInput(req.body);
+  const saved=transaction(()=>{
+    const row=query<{revision:number}>('SELECT revision FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+    if((row?.revision??0)!==expected)throw new ApiError(409,'Draft changed on another device. Reload before saving.');
+    const revision=expected+1;
+    if(row)run('UPDATE account_drafts SET payload_json=?,revision=?,updated_at=? WHERE owner_id=? AND draft_key=?',
+      JSON.stringify(payload),revision,now(),user.id,key);
+    else run('INSERT INTO account_drafts(owner_id,draft_key,payload_json,revision,updated_at) VALUES(?,?,?,?,?)',
+      user.id,key,JSON.stringify(payload),revision,now());
+    emitChange(user.id,'updated','draft',key);
+    return {revision,updatedAt:now()};
+  });
+  res.json(saved);
+}));
+app.delete('/api/v1/drafts/:key',handler((req,res)=>{
+  const user=account(req),key=draftKey(req.params.key),expected=Number(req.body?.revision);
+  if(!Number.isSafeInteger(expected)||expected<0)throw new ApiError(400,'Invalid revision');
+  transaction(()=>{
+    const row=query<{revision:number}>('SELECT revision FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+    if(!row)throw new ApiError(404,'Draft not found');
+    if(row.revision!==expected)throw new ApiError(409,'Draft changed on another device');
+    run('DELETE FROM account_drafts WHERE owner_id=? AND draft_key=?',user.id,key);
+    emitChange(user.id,'deleted','draft',key);
+  });
+  res.json({ok:true});
+}));
 app.get('/api/v1/changes',handler((req,res)=>{
   const user=account(req),since=cursor(req.query.since);
   res.json(changes(user.id,since,200));

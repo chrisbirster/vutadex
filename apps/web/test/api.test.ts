@@ -260,3 +260,27 @@ test('M6 authenticated SSE stream replays owned changes and terminates on abort'
   const outsider=await request('/changes/stream','GET');
   assert.equal(outsider.status,401);
 });
+
+test('M6 drafts persist across devices with optimistic revision conflicts and ownership',async()=>{
+  const one=await session('m6-draft@example.com');
+  const two=await session('m6-draft@example.com');
+  const other=await session('m6-draft-other@example.com');
+  const empty=await request('/drafts/new','GET',undefined,one.cookie);
+  assert.equal((await empty.json() as {draft:unknown}).draft,null);
+  const draft={deckId:'',type:'basic',front:'Unsaved question',back:'Unsaved answer',tags:'one'};
+  const created=await request('/drafts/new','PUT',{...draft,revision:0},one.cookie);
+  assert.equal(created.status,200);
+  assert.equal((await created.json() as {revision:number}).revision,1);
+  const seen=await (await request('/drafts/new','GET',undefined,two.cookie)).json() as {draft:{front:string;revision:number}};
+  assert.equal(seen.draft.front,'Unsaved question');
+  assert.equal((await request('/drafts/new','PUT',{...draft,front:'Stale',revision:0},two.cookie)).status,409);
+  assert.equal((await request('/drafts/new','GET',undefined,other.cookie).then(r=>r.json()) as {draft:unknown}).draft,null);
+  const updated=await request('/drafts/new','PUT',{...draft,front:'Updated by A',revision:1},one.cookie);
+  assert.equal(updated.status,200);
+  const newRevision=(await updated.json() as {revision:number}).revision;
+  assert.equal((await request('/drafts/new','DELETE',{revision:1},two.cookie)).status,409);
+  assert.equal((await request('/drafts/new','DELETE',{revision:newRevision},one.cookie)).status,200);
+  assert.equal((await request('/drafts/new','GET',undefined,two.cookie).then(r=>r.json()) as {draft:unknown}).draft,null);
+  const feed=await (await request('/changes?since=0','GET',undefined,two.cookie)).json() as {changes:{resource:string;kind:string}[]};
+  assert.ok(feed.changes.some(e=>e.resource==='draft'&&e.kind==='deleted'));
+});
