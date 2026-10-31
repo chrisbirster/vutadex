@@ -1,5 +1,7 @@
 name: Web App
 on:
+  push:
+    branches: [feat/web-app-foundation-20261030]
   pull_request:
     branches: [dev, main]
     paths:
