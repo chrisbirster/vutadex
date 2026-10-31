@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
+import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
 
@@ -46,7 +47,7 @@ app.use((req,res,next)=>{
   const requestId=randomUUID(); res.setHeader('x-request-id', requestId);
   const start=now(); res.on('finish',()=>logger.info({requestId,method:req.method,status:res.statusCode,elapsedMs:now()-start},'http')); next();
 });
-app.use(express.json({limit:'64kb'}));
+app.use(express.json({limit:'4mb'}));
 app.use((req,res,next)=>{
   if (!['GET','HEAD','OPTIONS'].includes(req.method) && req.path.startsWith('/api/')) {
     // Same-origin protection for all state changes, including login.
@@ -153,22 +154,87 @@ app.get('/api/v1/decks/:id',handler((req,res)=>{
   const notes=list('SELECT id,type,front,back,tags,created_at FROM notes WHERE deck_id=? AND owner_id=? ORDER BY created_at DESC',id,user.id);
   res.json({deck,notes});
 }));
+
+function getImportedDeck(body:any):ImportedDeck{
+  if(!body||typeof body.content!=='string')throw new ApiError(400,'Missing import content');
+  if(body.format==='csv')return parseCsv(body.content,required(body.name,'deck name',120));
+  if(body.format==='deck')return parseDeckFile(body.content);
+  throw new ApiError(400,'Expected import format deck or csv');
+}
+function writeNote(owner:string,deckId:string,note:NotePayload,existing?:{id:string;revision:number}) {
+  const variants=generateVariants(note),time=now();
+  const id=existing?.id||randomUUID();
+  if(existing){
+    const previous=query<{revision:number}>('SELECT revision FROM notes WHERE id=? AND owner_id=? AND deck_id=?',id,owner,deckId);
+    if(!previous)throw new ApiError(404,'Note not found');
+    if(previous.revision!==existing.revision)throw new ApiError(409,'Note changed on another device. Reload before saving.');
+    run('UPDATE notes SET type=?,front=?,back=?,tags=?,revision=revision+1 WHERE id=? AND owner_id=?',note.type,note.front,note.back,note.tags,id,owner);
+  }else{
+    run('INSERT INTO notes(id,deck_id,owner_id,type,front,back,tags,created_at) VALUES(?,?,?,?,?,?,?,?)',id,deckId,owner,note.type,note.front,note.back,note.tags,time);
+  }
+  const current=list<{id:string;variant:string}>('SELECT id,variant FROM cards WHERE note_id=? AND owner_id=?',id,owner);
+  const variantsSet=new Set(variants.map(v=>v.name));
+  for(const prior of current){
+    if(!variantsSet.has(prior.variant))run('UPDATE cards SET retired=1 WHERE id=? AND owner_id=?',prior.id,owner);
+  }
+  for(const variant of variants) {
+    const old=current.find(c=>c.variant===variant.name);
+    if(old)run('UPDATE cards SET front=?,back=?,retired=0 WHERE id=? AND owner_id=?',variant.front,variant.back,old.id,owner);
+    else run('INSERT INTO cards(id,note_id,deck_id,owner_id,variant,front,back,due_at) VALUES(?,?,?,?,?,?,?,?)',randomUUID(),id,deckId,owner,variant.name,variant.front,variant.back,time);
+  }
+  return {id,deckId,...note,revision:existing?existing.revision+1:0,generatedCards:variants.length};
+}
 app.post('/api/v1/notes',handler((req,res)=>{
-  const user=account(req);const deckId=required(req.body?.deckId,'deck ID',100);
+  const user=account(req),deckId=required(req.body?.deckId,'deck ID',100);
   if(!query('SELECT id FROM decks WHERE id=? AND owner_id=?',deckId,user.id))throw new ApiError(404,'Deck not found');
-  const type=required(req.body?.type,'card type',30);
-  if(!['basic','reverse','cloze'].includes(type))throw new ApiError(400,'Unsupported card type');
-  const front=required(req.body?.front,'front',6000),back=type==='cloze'?(typeof req.body?.back==='string'?req.body.back.slice(0,6000):''):required(req.body?.back,'back',6000);
-  const tags=typeof req.body?.tags==='string'?req.body.tags.slice(0,300):'';
-  const cloze=[...front.matchAll(/\{\{c([1-9][0-9]*)::([^{}]+)\}\}/g)];
-  if(type==='cloze' && !cloze.length)throw new ApiError(400,'Use {{c1::answer}} cloze syntax');
-  const variants=type==='cloze'?[...new Set(cloze.map(m=>m[1]))].map(n=>({name:'cloze:'+n,front:front.replace(/\{\{c([1-9][0-9]*)::([^{}]+)\}\}/g,(_m,k,v)=>k===n?'[...]':v),back:front.replace(/\{\{c([1-9][0-9]*)::([^{}]+)\}\}/g,(_m,_k,v)=>v)+(back?'\n'+back:'')})):[{name:'front',front,back},...(type==='reverse'?[{name:'reverse',front:back,back:front}]:[])];
-  const noteId=randomUUID();
-  transaction(()=>{
-    run('INSERT INTO notes(id,deck_id,owner_id,type,front,back,tags,created_at) VALUES(?,?,?,?,?,?,?,?)',noteId,deckId,user.id,type,front,back,tags,now());
-    for(const v of variants)run('INSERT INTO cards(id,note_id,deck_id,owner_id,variant,front,back,due_at) VALUES(?,?,?,?,?,?,?,?)',randomUUID(),noteId,deckId,user.id,v.name,v.front,v.back,now());
-  });
-  res.status(201).json({note:{id:noteId,deckId,type,front,back,tags},generatedCards:variants.length});
+  const note=validateNote(req.body);
+  const saved=transaction(()=>writeNote(user.id,deckId,note));
+  res.status(201).json({note:saved,generatedCards:saved.generatedCards});
+}));
+app.get('/api/v1/notes/:id',handler((req,res)=>{
+  const user=account(req);
+  const note=query('SELECT id,deck_id AS deckId,type,front,back,tags,revision FROM notes WHERE id=? AND owner_id=?',String(req.params.id),user.id);
+  if(!note)throw new ApiError(404,'Note not found');
+  res.json({note});
+}));
+app.put('/api/v1/notes/:id',handler((req,res)=>{
+  const user=account(req);
+  const id=String(req.params.id);
+  const existing=query<{deck_id:string;revision:number}>('SELECT deck_id,revision FROM notes WHERE id=? AND owner_id=?',id,user.id);
+  if(!existing)throw new ApiError(404,'Note not found');
+  const revision=Number(req.body?.revision);
+  if(!Number.isSafeInteger(revision)||revision<0)throw new ApiError(400,'Expected note revision');
+  const note=validateNote(req.body);
+  const saved=transaction(()=>writeNote(user.id,existing.deck_id,note,{id,revision}));
+  res.json({note:saved});
+}));
+app.post('/api/v1/import/preview',handler((req,res)=>{
+  const user=account(req);
+  const imported=getImportedDeck(req.body);
+  // An account check is mandatory, even for preview, to avoid anonymous parsing/resource usage.
+  void user;
+  res.json({name:imported.name,notes:imported.notes.length,cards:imported.notes.reduce((n,item)=>n+generateVariants(item).length,0)});
+}));
+app.post('/api/v1/import',handler((req,res)=>{
+  const user=account(req);
+  const imported=getImportedDeck(req.body);
+  const id=randomUUID();
+  try{
+    transaction(()=>{
+      run('INSERT INTO decks(id,owner_id,name,description,created_at) VALUES(?,?,?,?,?)',id,user.id,imported.name,'Imported content-only deck',now());
+      for(const note of imported.notes)writeNote(user.id,id,note);
+    });
+  }catch(e){if(String(e).includes('UNIQUE'))throw new ApiError(409,'Deck name already exists');throw e;}
+  res.status(201).json({deckId:id,notes:imported.notes.length});
+}));
+app.get('/api/v1/decks/:id/export',handler((req,res)=>{
+  const user=account(req),id=String(req.params.id);
+  const deck=query<{name:string}>('SELECT name FROM decks WHERE id=? AND owner_id=?',id,user.id);
+  if(!deck)throw new ApiError(404,'Deck not found');
+  const notes=list<{type:NotePayload['type'];front:string;back:string;tags:string}>('SELECT type,front,back,tags FROM notes WHERE deck_id=? AND owner_id=? ORDER BY created_at,id',id,user.id);
+  res.setHeader('content-type','text/plain; charset=utf-8');
+  res.setHeader('content-disposition','attachment; filename="vutadex.deck"');
+  res.send(serializeDeckFile({name:deck.name,notes}));
 }));
 app.post('/api/v1/study',handler((req,res)=>{
   const user=account(req); const deckId=req.body?.deckId;
@@ -224,6 +290,7 @@ const dist=resolve(import.meta.dirname,'../dist');
 if (existsSync(dist)) {app.use(express.static(dist));app.get('/{*path}',(_req,res)=>res.sendFile(resolve(dist,'index.html')));}
 app.use((err:unknown,_req:Request,res:Response,_next:NextFunction)=>{
   const status=err instanceof ApiError?err.status:500;
+  if(err instanceof ContentError){res.status(400).json({error:err.message});return;}
   if(status===500)logger.error({name:err instanceof Error?err.name:'Error'},'request failed');
   res.status(status).json({error:status===500?'Unexpected server error':(err as Error).message});
 });

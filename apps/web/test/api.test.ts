@@ -127,3 +127,43 @@ test('email local part is not rewritten and domain is canonicalized',async()=>{
   const items=await (await request('/dev/inbox')).json() as {email:string;link:string}[];
   assert.equal(items.at(-1)!.email,'Test+one@example.com');
 });
+
+test('M4 note editing protects revision and ownership',async()=>{
+  const a=await session('m4-edit@example.com');
+  const made=await request('/decks','POST',{name:'M4 Edit'},a.cookie);
+  assert.equal(made.status,201);
+  const deckId=(await made.json() as {deck:{id:string}}).deck.id;
+  const newNote=await request('/notes','POST',{deckId,type:'reverse',front:'France',back:'Paris',tags:'geography'},a.cookie);
+  assert.equal(newNote.status,201);
+  const id=(await newNote.json() as {note:{id:string}}).note.id;
+  const edit=await request('/notes/'+id,'PUT',{type:'reverse',front:'Italy',back:'Rome',tags:'capital',revision:0},a.cookie);
+  assert.equal(edit.status,200);
+  assert.equal((await edit.json() as {note:{revision:number}}).note.revision,1);
+  assert.equal((await request('/notes/'+id,'PUT',{type:'basic',front:'Bad',back:'Old',tags:'',revision:0},a.cookie)).status,409);
+  assert.equal((await request('/notes/'+id,'GET',undefined,a.cookie)).status,200);
+  const stranger=await session('m4-edit-other@example.com');
+  assert.equal((await request('/notes/'+id,'GET',undefined,stranger.cookie)).status,404);
+  assert.equal((await request('/notes/'+id,'PUT',{type:'basic',front:'X',back:'Y',tags:'',revision:1},stranger.cookie)).status,404);
+});
+test('M4 portable import preview, export and no partial imported deck on invalid input',async()=>{
+  const a=await session('m4-import@example.com');
+  const contents=[
+    JSON.stringify({kind:'deck',format:'plandalf.deck',version:2,name:'Imported M4'}),
+    JSON.stringify({kind:'note',note_type:'reverse',fields:['France','Paris'],tags_json:'["geography"]'})
+  ].join('\n')+'\n';
+  const preview=await request('/import/preview','POST',{format:'deck',content:contents},a.cookie);
+  assert.equal(preview.status,200);
+  assert.equal((await preview.json() as {cards:number}).cards,2);
+  const bad=await request('/import','POST',{format:'deck',content:contents+'{"kind":"review","rating":4}\n'},a.cookie);
+  assert.equal(bad.status,400);
+  const before=await (await request('/decks','GET',undefined,a.cookie)).json() as {decks:unknown[]};
+  assert.equal(before.decks.length,0);
+  const imported=await request('/import','POST',{format:'deck',content:contents},a.cookie);
+  assert.equal(imported.status,201);
+  const id=(await imported.json() as {deckId:string}).deckId;
+  const exported=await request('/decks/'+id+'/export','GET',undefined,a.cookie);
+  assert.equal(exported.status,200);
+  assert.match(await exported.text(),/"format":"plandalf.deck"/);
+  const other=await session('m4-export-other@example.com');
+  assert.equal((await request('/decks/'+id+'/export','GET',undefined,other.cookie)).status,404);
+});

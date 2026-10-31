@@ -26,3 +26,10 @@ export function transaction<T>(work: () => T): T {
 
 db.exec("CREATE TABLE IF NOT EXISTS auth_attempts (key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);");
 db.exec("CREATE INDEX IF NOT EXISTS challenges_email ON challenges(email,expires_at);");
+
+function addColumn(table:'notes'|'cards',name:string,declaration:string):void{
+  const cols=db.prepare('PRAGMA table_info('+table+')').all() as {name:string}[];
+  if(!cols.some(c=>c.name===name))db.exec('ALTER TABLE '+table+' ADD COLUMN '+declaration);
+}
+addColumn('notes','revision','revision INTEGER NOT NULL DEFAULT 0');
+addColumn('cards','retired','retired INTEGER NOT NULL DEFAULT 0');
