@@ -5,6 +5,10 @@ A local-first TypeScript terminal flashcard application. No server, Fly.io, or c
 ## Requirements
 Node.js 26 and npm.
 
+## Web application roadmap
+
+The proposed browser application is planned in [Web app milestones and tasks](docs/web-app-plan.md): React, TypeScript, TanStack Router, use-immer, Express, Pino, and email magic-link authentication with shared account data across devices.
+
 ## Development
 ```sh
 npm ci
