@@ -41,3 +41,8 @@ db.exec(
   "CREATE TABLE IF NOT EXISTS review_undo (event_id TEXT PRIMARY KEY REFERENCES review_events(id), owner_id TEXT NOT NULL REFERENCES users(id), session_id TEXT NOT NULL REFERENCES study_sessions(id), card_id TEXT NOT NULL REFERENCES cards(id), before_json TEXT NOT NULL, queue_json TEXT NOT NULL, position INTEGER NOT NULL, after_revision INTEGER NOT NULL, created_at INTEGER NOT NULL, undone_at INTEGER);"+
   "CREATE INDEX IF NOT EXISTS review_undo_session ON review_undo(owner_id,session_id,created_at);"
 );
+
+db.exec(
+  "CREATE TABLE IF NOT EXISTS account_changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL, resource TEXT NOT NULL, resource_id TEXT NOT NULL, created_at INTEGER NOT NULL);"+
+  "CREATE INDEX IF NOT EXISTS account_changes_owner_seq ON account_changes(owner_id,seq);"
+);

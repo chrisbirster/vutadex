@@ -14,6 +14,45 @@ type Study = {card:{id:string;front:string;back:string;due_at:number}|null;posit
 type SessionState = {user:User|null;loading:boolean;error:string};
 type SessionContextValue={session:SessionState;refresh:()=>Promise<void>};
 const SessionContext=createContext<SessionContextValue|null>(null);
+const AccountChangeContext=createContext(0);
+function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>Promise<void>;children:React.ReactNode}){
+  const [state,setState]=useImmer({cursor:0,revision:0,connected:false});
+  useEffect(()=>{
+    if(!owner)return;
+    let closed=false,seq=0;
+    let stream:EventSource|null=null;
+    const catchup=async()=>{
+      try{
+        let more=true;
+        while(!closed&&more){
+          const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq);
+          if(response.changes.length)setState(d=>{d.revision++;});
+          seq=response.cursor;more=response.hasMore;
+        }
+        if(!closed)setState(d=>{d.connected=true;d.cursor=seq;});
+      }catch{if(!closed)setState(d=>{d.connected=false;});}
+    };
+    const setup=async()=>{
+      await catchup();if(closed)return;
+      stream=new EventSource('/api/v1/changes/stream?since='+seq);
+      stream.addEventListener('change',(event:Event)=>{
+        const data=JSON.parse((event as MessageEvent<string>).data) as {seq:number};
+        if(data.seq<=seq)return;
+        seq=data.seq;setState(d=>{d.cursor=seq;d.revision++;d.connected=true;});
+      });
+      stream.addEventListener('session-expired',()=>{stream?.close();void refresh();});
+      stream.onerror=()=>setState(d=>{d.connected=false;});
+      stream.onopen=()=>setState(d=>{d.connected=true;});
+    };
+    void setup();
+    const onFocus=()=>{void catchup();};
+    const onVisible=()=>{if(document.visibilityState==='visible')void catchup();};
+    window.addEventListener('focus',onFocus);
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{closed=true;stream?.close();window.removeEventListener('focus',onFocus);document.removeEventListener('visibilitychange',onVisible);};
+  },[owner,setState]);
+  return <AccountChangeContext.Provider value={state.revision}>{children}</AccountChangeContext.Provider>;
+}
 function useSession(){const value=useContext(SessionContext);if(!value)throw new Error('SessionProvider missing');return value;}
 async function api<T>(path:string, options?:{method?:string;body?:unknown;signal?:AbortSignal}):Promise<T>{
   const response=await fetch('/api/v1'+path,{method:options?.method||'GET',credentials:'same-origin',signal:options?.signal,headers:options?.body===undefined?{}:{'content-type':'application/json'},body:options?.body===undefined?undefined:JSON.stringify(options.body)});
@@ -23,6 +62,7 @@ async function api<T>(path:string, options?:{method?:string;body?:unknown;signal
   return payload as T;
 }
 function useResource<T>(url:string|null){
+  const changeRevision=useContext(AccountChangeContext);
   const [state,setState]=useImmer<{data:T|null;loading:boolean;error:string}>({data:null,loading:!!url,error:''});
   const [refresh,setRefresh]=useState(0);
   const owner=useSession().session.user?.id;
@@ -33,7 +73,7 @@ function useResource<T>(url:string|null){
     api<T>(url,{signal:controller.signal}).then(data=>{if(!controller.signal.aborted)setState({data,loading:false,error:''});})
       .catch((error:unknown)=>{if(!controller.signal.aborted)setState({data:null,loading:false,error:String(error)});});
     return ()=>controller.abort();
-  },[url,owner,refresh,setState]);
+  },[url,owner,refresh,setState,changeRevision]);
   return {...state,reload:()=>setRefresh(n=>n+1)};
 }
 const routeRoot=createRootRoute({component:Application,notFoundComponent:()=> <Empty title="Page not found" message="Bongo searched under the couch. Nothing there."/>});
@@ -84,7 +124,7 @@ function Application(){
   if(authPage)return <SessionContext.Provider value={{session,refresh}}><main className="auth-background"><Outlet/></main></SessionContext.Provider>;
   const signOut=async()=>{await api('/logout',{method:'POST'});setSession({user:null,loading:false,error:''});void navigate({to:'/login'});};
   return <SessionContext.Provider value={{session,refresh}}>
-    <div className="app">
+    <AccountSyncProvider owner={session.user?.id||''} refresh={refresh}><div className="app">
       <aside className={'sidebar '+(mobileNav?'sidebar-open':'')}>
         <div className="brand"><div className="brand-mark"><Layers3 size={27}/></div><div><strong>Vutadex</strong><small>Memories that actually stick<br/>(and occasionally make you laugh)</small></div></div>
         <nav aria-label="Main navigation">{NAV.map(item=><Link key={item.label} to={item.to} activeOptions={{exact:item.to==='/'}} className="nav-link" activeProps={{className:'nav-link active'}}><item.icon size={21} strokeWidth={2.3}/><span>{item.label}</span></Link>)}</nav>
@@ -95,7 +135,7 @@ function Application(){
         <header className="topbar"><button className="mobile-menu icon-button" aria-label="Open navigation" onClick={()=>setMobileNav(true)}><Menu/></button><Link to="/" className="mobile-logo">Vutadex</Link><div className="search-shell"><Search size={20}/><input aria-label="Find decks" placeholder="Search decks, cards, or existential questions..." onKeyDown={e=>{if(e.key==='Enter'&&e.currentTarget.value.trim())void navigate({to:'/decks',search:undefined});}}/><kbd>⌘ K</kbd></div><div className="avatar"><div className="avatar-cat"><Bongo/></div><div><strong>{session.user?.email.split('@')[0]||'Learner'}</strong><small>More cards. Less forgetting.</small></div></div><button className="icon-button logout" onClick={()=>void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={19}/></button></header>
         <main className="content"><Outlet/></main>
       </div>
-    </div>
+    </div></AccountSyncProvider>
   </SessionContext.Provider>;
 }
 function Empty({title,message,action}:{title:string;message:string;action?:React.ReactNode}){return <div className="empty card"><Bongo mood="thinking"/><h2>{title}</h2><p>{message}</p>{action}</div>;}
