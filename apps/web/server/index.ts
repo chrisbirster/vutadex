@@ -40,7 +40,7 @@ function account(req: Request): Account {
 function sendCookie(res: Response, value: string, age: number) {
   res.cookie(cookieName,value,{httpOnly:true,secure:production,sameSite:'lax',path:'/',maxAge:age});
 }
-function handler(fn: (req:Request,res:Response)=>void|Promise<void>) { return (req:Request,res:Response,next:NextFunction) => { try { Promise.resolve(fn(req,res)).catch(next); } catch(e){next(e);} }; }
+function handler(fn: (req:Request,res:Response)=>unknown) { return (req:Request,res:Response,next:NextFunction) => { try { Promise.resolve(fn(req,res)).catch(next); } catch(e){next(e);} }; }
 app.disable('x-powered-by');
 app.use((req,res,next)=>{
   const requestId=randomUUID(); res.setHeader('x-request-id', requestId);
