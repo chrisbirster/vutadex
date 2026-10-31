@@ -160,21 +160,59 @@ function DecksPage(){const {data,loading,error}=useResource<{decks:Deck[]}>('/de
 function NewDeckPage(){const [form,setForm]=useImmer({name:'',description:''});const [error,setError]=useState('');const [busy,setBusy]=useState(false);const navigate=useNavigate();async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{const r=await api<{deck:{id:string}}>('/decks',{method:'POST',body:form});void navigate({to:'/decks/$deckId',params:{deckId:r.deck.id}});}catch(e){setError(String(e));}finally{setBusy(false);}}return <><Heading title="Create a New Deck" subtitle="A place for your questionable amount of knowledge."/><form className="card form-card" onSubmit={e=>void submit(e)}><label>Deck name<input required maxLength={120} value={form.name} onChange={e=>setForm(d=>{d.name=e.target.value;})} placeholder="e.g. Philosophy, TypeScript, Cats"/></label><label>Description (optional)<textarea maxLength={500} value={form.description} onChange={e=>setForm(d=>{d.description=e.target.value;})} placeholder="What are we learning?"/></label><Notice text={error}/><button className="primary" disabled={busy}>{busy?'Creating...':'Create Deck'}</button></form></>;}
 function DeckDetailPage(){const {deckId}=routeDeckDetail.useParams();const {data,loading,error}=useResource<{deck:Deck;notes:Note[]}>('/decks/'+encodeURIComponent(deckId));const navigate=useNavigate();if(loading)return <Loading/>;if(error)return <Notice text={error}/>;const deck=data!.deck;return <><Heading title={deck.name} subtitle={deck.description||'Every card counts.'}/><div className="actions"><Link className="button primary" to="/cards/new" search={{deckId}}><Plus/> Add Cards</Link><button className="secondary" onClick={()=>void startStudy(navigate,deckId)}><Play/> Study Deck</button><a className="button secondary" href={"/api/v1/decks/"+encodeURIComponent(deckId)+"/export"}><Download/> Export .deck</a></div><div className="section-heading"><h2>Notes ({data!.notes.length})</h2></div>{data!.notes.length?<div className="notes-list">{data!.notes.map(n=><div className="note-row card" key={n.id}><div><small className="pill">{n.type}</small><h3>{n.front}</h3><p>{n.back||'Cloze card'}</p><small>{n.tags}</small><div className="actions"><Link className="button secondary" to="/notes/$noteId/edit" params={{noteId:n.id}}>Edit Note</Link></div></div></div>)}</div>:<Empty title="No cards yet" message="Feed the knowledge goblin with your first note." action={<Link className="button primary" to="/cards/new" search={{deckId}}>Add Cards</Link>}/>}</>;}
 
-const NOTE_KINDS=['basic','reverse','optional-reverse','cloze','type-answer','multiple-choice','multiple-select','ordering'] as const;
+const NOTE_KINDS=['basic','reverse','optional-reverse','cloze','type-answer','multiple-choice','multiple-select','ordering','image-occlusion'] as const;
 const FIELD_NAMES:Record<string,string[]>={basic:['Front','Back'],reverse:['Front','Back'],'optional-reverse':['Front','Back','Add reverse card'],
   cloze:['Cloze text','Extra'],'type-answer':['Question','Typed answer'],'multiple-choice':['Prompt','Choices','Correct choice','Explanation'],
-  'multiple-select':['Prompt','Choices','Correct choices','Explanation'],ordering:['Prompt','Items in correct order','Explanation']};
+  'multiple-select':['Prompt','Choices','Correct choices','Explanation'],ordering:['Prompt','Items in correct order','Explanation'],'image-occlusion':['Image','Masks','Extra']};
 type ChoiceShape={id:string;text:string};
 function decodeChoices(input:string):ChoiceShape[]{
   try {const data=JSON.parse(input) as unknown;return Array.isArray(data)?data.filter((x):x is ChoiceShape=>!!x&&typeof x.id==='string'&&typeof x.text==='string'):[];}catch{return [];}
 }
 function fieldsForEditor(type:string,front:string,back:string):string[]{
   const choices=JSON.stringify([{id:'1',text:''},{id:'2',text:''}]);
-  return type==='optional-reverse'?[front,back,'']:type==='multiple-choice'?[front,choices,'1','']:
+  return type==='image-occlusion'?['','[]','']:type==='optional-reverse'?[front,back,'']:type==='multiple-choice'?[front,choices,'1','']:
     type==='multiple-select'?[front,choices,'["1"]','']:type==='ordering'?[front,choices,'']:[front,back];
 }
+
+function ImageOcclusionFields({fields,onChange}:{fields:string[];onChange:(fields:string[])=>void}){
+  const [uploadError,setUploadError]=useState(''),[uploading,setUploading]=useState(false);
+  const set=(i:number,value:string)=>{const next=[...fields];next[i]=value;onChange(next);};
+  const hash=/^deez-media:\/\/sha256:([a-f0-9]{64})$/.exec(fields[0]||'')?.[1];
+  let masks:{id:number;x:number;y:number;width:number;height:number;answer:string;prompt?:string}[]=[];
+  try{const parsed=JSON.parse(fields[1]||'[]') as unknown;if(Array.isArray(parsed))masks=parsed;}catch{/* Invalid old data is surfaced on save. */}
+  const saveMasks=(next:typeof masks)=>set(1,JSON.stringify(next));
+  async function upload(file:File|undefined){
+    if(!file)return;
+    if(file.size>2*1024*1024){setUploadError('Image must be 2 MiB or smaller.');return;}
+    setUploading(true);setUploadError('');
+    try{
+      const data=new Uint8Array(await file.arrayBuffer());let raw='';
+      for(let i=0;i<data.length;i+=8192)raw+=String.fromCharCode(...data.subarray(i,i+8192));
+      const response=await api<{ref:string}>('/media',{method:'POST',body:{data:btoa(raw)}});
+      set(0,response.ref);
+    }catch(e){setUploadError(String(e));}finally{setUploading(false);}
+  }
+  return <fieldset className="choices-editor"><legend>Image occlusion</legend>
+    <label>Image (PNG/JPEG/WebP, 2 MiB max)<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>void upload(e.target.files?.[0])}/></label>
+    {uploading&&<p role="status">Uploading image...</p>}
+    {uploadError&&<Notice text={uploadError}/>}
+    {hash&&<img src={'/api/v1/media/'+hash} alt="Image to memorize" style={{maxWidth:'100%',maxHeight:300}}/>}
+    <p className="muted">Masks use normalized 0–1 coordinates. Graphic drag editing is not available yet.</p>
+    {masks.map((mask,index)=><div key={mask.id} className="card" style={{marginBottom:12}}>
+      <strong>Mask {mask.id}</strong>
+      <div className="field-grid">{(['x','y','width','height'] as const).map(k=><label key={k}>{k}<input type="number" min="0" max="1" step=".01" value={mask[k]} onChange={e=>saveMasks(masks.map((m,j)=>j===index?{...m,[k]:Number(e.target.value)}:m))}/></label>)}</div>
+      <label>Answer<input required value={mask.answer} onChange={e=>saveMasks(masks.map((m,j)=>j===index?{...m,answer:e.target.value}:m))}/></label>
+      <label>Prompt (optional)<input value={mask.prompt||''} onChange={e=>saveMasks(masks.map((m,j)=>j===index?{...m,prompt:e.target.value}:m))}/></label>
+      <button type="button" className="secondary" onClick={()=>saveMasks(masks.filter((_,j)=>j!==index))}>Remove Mask</button>
+    </div>)}
+    <button type="button" className="secondary" disabled={masks.length>=100} onClick={()=>saveMasks([...masks,{id:Math.max(0,...masks.map(m=>m.id))+1,x:0.1,y:0.1,width:0.2,height:0.2,answer:''}])}>Add Mask</button>
+    <label>Extra notes<textarea value={fields[2]||''} maxLength={6000} onChange={e=>set(2,e.target.value)}/></label>
+  </fieldset>;
+}
+
 function CardFields({type,fields,onChange}:{type:string;fields:string[];onChange:(values:string[])=>void}){
   const labels=FIELD_NAMES[type]||FIELD_NAMES.basic!;
+  if(type==='image-occlusion')return <ImageOcclusionFields fields={fields} onChange={onChange}/>;
   const set=(index:number,value:string)=>{const copy=[...fields];copy[index]=value;onChange(copy);};
   const hasChoices=['multiple-choice','multiple-select','ordering'].includes(type);
   const choices=hasChoices?decodeChoices(fields[1]||''):[];
@@ -228,7 +266,7 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
 
   useEffect(()=>{if(deckId)setForm(s=>{s.deckId=deckId;});},[deckId,setForm]);
   async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{const result=await api<{generatedCards:number}>('/notes',{method:'POST',body:form});setMessage('Saved! '+result.generatedCards+' card(s) ready to study.');setForm(s=>{s.front='';s.back='';s.fields=fieldsForEditor(s.type,'','');s.tags='';});const cleared={...form,front:'',back:'',fields:fieldsForEditor(form.type,'',''),tags:''};lastSaved.current=JSON.stringify(cleared);if(draftRevision>0){void api('/drafts/new',{method:'DELETE',body:{revision:draftRevision}}).then(()=>{setDraftRevision(0);setDraftStatus('Card saved. Draft cleared.');}).catch(()=>{setDraftConflict(true);setDraftStatus('Card saved, but the draft changed elsewhere. Reload before editing again.');});}}catch(e){setError(String(e));}finally{setBusy(false);}}
-  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&<button type="button" className="secondary" onClick={()=>{setDraftReady(false);draft.reload();}}>Reload Server Draft (discards local edits)</button>}<Notice text={error}/>{message&&<div className="success" role="status">{message}</div>}<button disabled={busy} className="primary"><Sparkles size={18}/> {busy?'Saving...':'Save Card'}</button></form><aside className="editor-side"><div className="card preview"><h3><Eye size={20}/> Live Preview</h3><div className="preview-front">{form.front||'Your card front will appear here...'}</div><div className="preview-back">{form.back||'Your answer will appear here...'}</div><Bongo mood="happy"/></div><div className="card"><h3><CircleHelp size={20}/> Card Writing Tips</h3><p>One idea per card. Short, specific questions stick.</p><p>Use your own words. Future you says thanks.</p><p>Cloze example: <code>{'{{c1::answer}}'}</code>.</p></div></aside></div></>;
+  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&<button type="button" className="secondary" onClick={()=>{setDraftReady(false);draft.reload();}}>Reload Server Draft (discards local edits)</button>}<Notice text={error}/>{message&&<div className="success" role="status">{message}</div>}<button disabled={busy} className="primary"><Sparkles size={18}/> {busy?'Saving...':'Save Card'}</button></form><aside className="editor-side"><div className="card preview"><h3><Eye size={20}/> Live Preview</h3><div className="preview-front">{form.type==='image-occlusion'&&form.fields[0]?.startsWith('deez-media://sha256:')?<img src={'/api/v1/media/'+form.fields[0].slice(-64)} alt="Uploaded flashcard visual" style={{maxWidth:'100%'}}/>:form.front||'Your card front will appear here...'}</div><div className="preview-back">{form.back||'Your answer will appear here...'}</div><Bongo mood="happy"/></div><div className="card"><h3><CircleHelp size={20}/> Card Writing Tips</h3><p>One idea per card. Short, specific questions stick.</p><p>Use your own words. Future you says thanks.</p><p>Cloze example: <code>{'{{c1::answer}}'}</code>.</p></div></aside></div></>;
 }
 
 function EditNotePage(){
