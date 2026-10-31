@@ -514,3 +514,27 @@ test('portable owned image backup survives export and atomic restore across acco
   assert.equal(restored.notes[0]?.fields[1],masks);
   assert.equal((await request('/portable/import','POST',{bundle:archive,confirmation:'IMPORT_PORTABLE'},second.cookie)).status,409);
 });
+test('study serves owned typed-answer and occlusion presentations with stable review authorization',async()=>{
+  const user=await session('study-typed-occlusion@example.com');
+  const other=await session('study-type-outsider@example.com');
+  const deckId=(await (await request('/decks','POST',{name:'Study Interactions'},user.cookie)).json() as {deck:{id:string}}).deck.id;
+  const image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==';
+  const {ref,sha256}=(await (await request('/media','POST',{data:image},user.cookie)).json()) as {ref:string;sha256:string};
+  const masks=JSON.stringify([{id:9,x:0.1,y:0.2,width:0.3,height:0.3,answer:'Bongo'}]);
+  assert.equal((await request('/notes','POST',{deckId,type:'image-occlusion',fields:[ref,masks,''],tags:''},user.cookie)).status,201);
+  const studyId=(await (await request('/study','POST',{deckId},user.cookie)).json() as {id:string}).id;
+  const first=await (await request('/study/'+studyId,'GET',undefined,user.cookie)).json() as {card:{presentation:{kind:string;imageHash:string;mask:{id:number};otherMasks:unknown[]};back:string};revision:number};
+  assert.equal(first.card.presentation.kind,'image-occlusion');
+  assert.equal(first.card.presentation.imageHash,sha256);
+  assert.equal(first.card.presentation.mask.id,9);
+  assert.ok(!JSON.stringify(first.card.presentation).includes('Bongo'));
+  assert.equal((await request('/study/'+studyId,'GET',undefined,other.cookie)).status,404);
+  assert.equal((await request('/study/'+studyId+'/rate','POST',{revision:first.revision,rating:3,operationId:crypto.randomUUID()},user.cookie)).status,200);
+
+  const typedDeck=(await (await request('/decks','POST',{name:'Typed Interactions'},user.cookie)).json() as {deck:{id:string}}).deck.id;
+  assert.equal((await request('/notes','POST',{deckId:typedDeck,type:'type-answer',fields:['Capital of France?','Paris'],tags:''},user.cookie)).status,201);
+  const secondId=(await (await request('/study','POST',{deckId:typedDeck},user.cookie)).json() as {id:string}).id;
+  const second=await (await request('/study/'+secondId,'GET',undefined,user.cookie)).json() as {card:{presentation:{kind:string};back:string}};
+  assert.equal(second.card.presentation.kind,'type-answer');
+  assert.equal(second.card.back,'Paris');
+});

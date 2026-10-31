@@ -8,6 +8,7 @@ import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
 import { MediaError, parseBase64Media, refHash } from './media.ts';
 import {PortableError,inspectPortable,createPortable} from './portable.ts';
+import {studyPresentation} from './study-presentation.ts';
 import { MigrationError, parseHistory, parseDate, stableId, type HistoryBundle } from './history.ts';
 import { matureRetention } from './retention.ts';
 import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex, accountDayKey } from './study-policy.ts';
@@ -600,11 +601,11 @@ app.get('/api/v1/study/:id',handler((req,res)=>{
       revision++;emitChange(user.id,'updated','study',id);
     }
     const current=queue[session.position];
-    const card=current?query<CardRow>('SELECT * FROM cards WHERE id=? AND owner_id=? AND retired=0',current,user.id):undefined;
+    const card=current?query<CardRow & {variant:string;note_type:string;fields_json:string|null}>('SELECT c.*,n.type AS note_type,n.fields_json AS fields_json FROM cards c JOIN notes n ON n.id=c.note_id AND n.owner_id=c.owner_id WHERE c.id=? AND c.owner_id=? AND c.retired=0',current,user.id):undefined;
     return {session,queue,revision,card};
   });
   const card=result.card;
-  res.json({card:card?{id:card.id,front:card.front,back:card.back,due_at:card.due_at}:null,
+  res.json({card:card?{id:card.id,front:card.front,back:card.back,due_at:card.due_at,presentation:studyPresentation(card.note_type,card.fields_json,card.variant)}:null,
     position:result.session.position,total:result.queue.length,revision:result.revision,paused:result.session.status==='paused',
     waiting:card?Math.max(0,card.due_at-now()):0,
     intervals:card?intervalPreviews(currentState(card),card.last_review_at,now()):[]});
