@@ -168,8 +168,10 @@ function draftInput(value:unknown):{deckId:string;type:string;front:string;back:
     if(typeof x!=='string'||x.length>max||x.includes('\0'))throw new ApiError(400,'Invalid draft '+key);
     result[key]=x;
   }
-  if(result.type && !['basic','reverse','cloze'].includes(result.type))throw new ApiError(400,'Unsupported draft type');
-  return result as {deckId:string;type:string;front:string;back:string;tags:string};
+  if(result.type && !['basic','reverse','optional-reverse','cloze','type-answer','multiple-choice','multiple-select','ordering'].includes(result.type))throw new ApiError(400,'Unsupported draft type');
+  const fields=body.fields===undefined?[result.front,result.back]:body.fields;
+  if(!Array.isArray(fields)||fields.length>4||fields.some((v:unknown)=>typeof v!=='string'||v.length>6000||v.includes('\\0')))throw new ApiError(400,'Invalid draft fields');
+  return {...result,fields} as {deckId:string;type:string;front:string;back:string;tags:string;fields:string[]};
 }
 app.get('/api/v1/drafts/:key',handler((req,res)=>{
   const user=account(req),key=draftKey(req.params.key);
@@ -260,8 +262,8 @@ app.get('/api/v1/decks/:id',handler((req,res)=>{
   const user=account(req);const id=String(req.params.id);
   const deck=query('SELECT id,name,description FROM decks WHERE id=? AND owner_id=?',id,user.id);
   if(!deck)throw new ApiError(404,'Deck not found');
-  const notes=list('SELECT id,type,front,back,tags,created_at FROM notes WHERE deck_id=? AND owner_id=? ORDER BY created_at DESC',id,user.id);
-  res.json({deck,notes});
+  const notes=list<{id:string;type:string;front:string;back:string;tags:string;fields_json:string|null;created_at:number;revision:number}>('SELECT id,type,front,back,tags,fields_json,created_at,revision FROM notes WHERE deck_id=? AND owner_id=? ORDER BY created_at DESC',id,user.id);
+  res.json({deck,notes:notes.map(n=>({...n,fields:n.fields_json?JSON.parse(n.fields_json):[n.front,n.back],fields_json:undefined}))});
 }));
 
 function getImportedDeck(body:any):ImportedDeck{
@@ -277,9 +279,9 @@ function writeNote(owner:string,deckId:string,note:NotePayload,existing?:{id:str
     const previous=query<{revision:number}>('SELECT revision FROM notes WHERE id=? AND owner_id=? AND deck_id=?',id,owner,deckId);
     if(!previous)throw new ApiError(404,'Note not found');
     if(previous.revision!==existing.revision)throw new ApiError(409,'Note changed on another device. Reload before saving.');
-    run('UPDATE notes SET type=?,front=?,back=?,tags=?,revision=revision+1 WHERE id=? AND owner_id=?',note.type,note.front,note.back,note.tags,id,owner);
+    run('UPDATE notes SET type=?,front=?,back=?,tags=?,fields_json=?,revision=revision+1 WHERE id=? AND owner_id=?',note.type,note.front,note.back,note.tags,JSON.stringify(note.fields),id,owner);
   }else{
-    run('INSERT INTO notes(id,deck_id,owner_id,type,front,back,tags,created_at) VALUES(?,?,?,?,?,?,?,?)',id,deckId,owner,note.type,note.front,note.back,note.tags,time);
+    run('INSERT INTO notes(id,deck_id,owner_id,type,front,back,tags,fields_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)',id,deckId,owner,note.type,note.front,note.back,note.tags,JSON.stringify(note.fields),time);
   }
   const current=list<{id:string;variant:string}>('SELECT id,variant FROM cards WHERE note_id=? AND owner_id=?',id,owner);
   const variantsSet=new Set(variants.map(v=>v.name));
@@ -302,9 +304,9 @@ app.post('/api/v1/notes',handler((req,res)=>{
 }));
 app.get('/api/v1/notes/:id',handler((req,res)=>{
   const user=account(req);
-  const note=query('SELECT id,deck_id AS deckId,type,front,back,tags,revision FROM notes WHERE id=? AND owner_id=?',String(req.params.id),user.id);
+  const note=query<{id:string;deckId:string;type:string;front:string;back:string;tags:string;revision:number;fields_json:string|null}>('SELECT id,deck_id AS deckId,type,front,back,tags,revision,fields_json FROM notes WHERE id=? AND owner_id=?',String(req.params.id),user.id);
   if(!note)throw new ApiError(404,'Note not found');
-  res.json({note});
+  res.json({note:{...note,fields:note.fields_json?JSON.parse(note.fields_json):[note.front,note.back],fields_json:undefined}});
 }));
 app.put('/api/v1/notes/:id',handler((req,res)=>{
   const user=account(req);
@@ -340,7 +342,7 @@ app.get('/api/v1/decks/:id/export',handler((req,res)=>{
   const user=account(req),id=String(req.params.id);
   const deck=query<{name:string}>('SELECT name FROM decks WHERE id=? AND owner_id=?',id,user.id);
   if(!deck)throw new ApiError(404,'Deck not found');
-  const notes=list<{type:NotePayload['type'];front:string;back:string;tags:string}>('SELECT type,front,back,tags FROM notes WHERE deck_id=? AND owner_id=? ORDER BY created_at,id',id,user.id);
+  const notes=list<{type:NotePayload['type'];front:string;back:string;tags:string;fields_json:string|null}>('SELECT type,front,back,tags,fields_json FROM notes WHERE deck_id=? AND owner_id=? ORDER BY created_at,id',id,user.id).map(n=>({...n,fields:n.fields_json?JSON.parse(n.fields_json) as string[]:[n.front,n.back]}));
   res.setHeader('content-type','text/plain; charset=utf-8');
   res.setHeader('content-disposition','attachment; filename="vutadex.deck"');
   res.send(serializeDeckFile({name:deck.name,notes}));

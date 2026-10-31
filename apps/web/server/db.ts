@@ -48,3 +48,5 @@ db.exec(
 );
 
 db.exec("CREATE TABLE IF NOT EXISTS account_drafts (owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, draft_key TEXT NOT NULL, payload_json TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(owner_id,draft_key));");
+
+addColumn('notes','fields_json',"fields_json TEXT");
