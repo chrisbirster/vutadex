@@ -258,7 +258,7 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
     const local={...formRef.current,revision:draftRevision};
     const base=lastSaved.current?JSON.parse(lastSaved.current) as DraftFields:local;
     const merged=reconcileFieldPaths(toEditable(base),toEditable(local),toEditable(response.draft||{...local,fields:['',''],front:'',back:'',tags:''}));
-    setDraftCompare({local,server:response.draft,chosen:merged.changes});
+    setDraftCompare({local,server:response.draft,chosen:merged.localChanges});
     setDraftConflict(true);
     setDraftStatus('Conflict: your draft is not saved. Compare both versions before choosing.');
   }
