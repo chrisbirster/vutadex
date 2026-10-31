@@ -59,7 +59,13 @@ test('two browsers: shared decks, draft editing and conflicting note writes are 
     await pb.getByLabel('Front').fill('Updated by B');
     await pb.getByRole('button',{name:'Save Changes'}).click();
     await expect(pb.getByRole('status').filter({hasText:/Saved/})).toBeVisible();
-    await expect(pa.getByRole('alert',{name:'Concurrent note edit'})).toBeVisible();
+    // SSE may race the user's explicit save. Both paths must reject stale writes
+    // without discarding A's unsaved text.
+    const concurrentAlert=pa.getByRole('alert',{name:'Concurrent note edit'});
+    if(!(await concurrentAlert.isVisible())){
+      await pa.getByRole('button',{name:'Save Changes'}).click();
+    }
+    await expect(concurrentAlert).toBeVisible();
     await expect(pa.getByText('Updated locally by A')).toBeVisible();
   }finally{await a.close();await b.close();}
 });
