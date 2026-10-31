@@ -66,7 +66,7 @@ test('two browsers: shared decks, draft editing and conflicting note writes are 
       await pa.getByRole('button',{name:'Save Changes'}).click();
     }
     await expect(concurrentAlert).toBeVisible();
-    await expect(pa.getByText('Updated locally by A')).toBeVisible();
+    await expect(pa.getByRole('textbox',{name:'Front'})).toHaveValue('Updated locally by A');
   }finally{await a.close();await b.close();}
 });
 test('mobile navigation is reachable with no horizontal overflow and no serious accessibility violations',async({page})=>{
