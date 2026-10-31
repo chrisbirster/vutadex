@@ -1,0 +1,11 @@
+# Web + terminal monorepo foundation (M0/M1 partial)
+
+**Decision (October 30, 2026):** preserve the published root `vutadex` CLI (Node 26, SQLite, existing release tests) as the terminal implementation. Add `apps/terminal` as the terminal entrypoint and `apps/web` as the new React/Express application. Both are declared npm workspaces. Moving CLI source files will happen only after CLI release-acceptance tests validate relocation. The FSRS-7 scheduler is reused directly from `fsrs/algorithm.ts` by the server; no independent browser scheduler is introduced.
+
+**First slice scope:** same-origin React + TanStack Router + use-immer UI; Express 5 + Pino; local Node SQLite with owned records; local-only magic-link test inbox; basic/reverse/cloze note generation; server-rated FSRS session; real metrics from local test data. The colored reference images are treated as art direction; responsive controls are real elements; Bongo is a simplified original inline SVG. CLI and server databases are fully separate.
+
+**Security boundary:** web API computes account owner exclusively from an opaque hashed server session cookie; all deck/note/card/review queries include server-derived owner. A read-only verify page does not consume a token. A POST with an exact Origin is required to consume it; production email is deliberately unavailable, not bypassed. The local inbox is bound to loopback. Challenge and session secrets are hashed in the database, not request logs. Responses to invalid sessions fail closed.
+
+**Unresolved before production:** Turso/libSQL driver/transaction spike, SES config/transport, distributed email/IP throttling, production proxy/cookie handling and HTTPS, account timezone, all content media and migration tooling, cross-device outbox/conflict handling, accessibility evaluation, email canonicalization sign-off, operational backup/recovery. This slice does not claim M2–M10 completion. The CLI format, migration state and package entrypoint remain unchanged.
+
+**Visual inventory:** Home (overview, due/decks, activity), Study (card/reveal/rating), Add Cards (deck/type/fields/preview), Stats (review heatmap and rating history). Narrow screens collapse the left sidebar behind a menu and stack columns. Empty, loading and errors use actual UI states, not sample stats from the wireframes.

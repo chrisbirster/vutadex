@@ -1,0 +1,16 @@
+{
+  "name": "@vutadex/terminal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "start": "node ../../index.ts",
+    "build": "npm run build --prefix ../..",
+    "typecheck": "npm run typecheck --prefix ../..",
+    "test": "npm run test --prefix ../..",
+    "check": "npm run check --prefix ../.."
+  }
+}
