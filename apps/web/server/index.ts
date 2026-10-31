@@ -8,6 +8,7 @@ import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
 import { MediaError, parseBase64Media, refHash } from './media.ts';
 import { MigrationError, parseHistory, parseDate, stableId, type HistoryBundle } from './history.ts';
+import { matureRetention } from './retention.ts';
 import { intervalForRating, intervalPreviews, localDayStart, validTimezone, pickReadyIndex, accountDayKey } from './study-policy.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
@@ -592,7 +593,7 @@ app.post('/api/v1/study/:id/rate',handler((req,res)=>{
     const {state,intervalMs}=intervalForRating(currentState(card),card.last_review_at,rating as Rating,time);
     run('UPDATE cards SET stability=?,difficulty=?,fast_stability=?,last_review_at=?,review_count=review_count+1,due_at=? WHERE id=? AND owner_id=?',
       state.stability,state.difficulty,state.fastStability,time,time+intervalMs,cardId,user.id);
-    run('INSERT INTO review_events(id,owner_id,card_id,rating,created_at) VALUES(?,?,?,?,?)',operationId,user.id,cardId,rating,time);
+    run('INSERT INTO review_events(id,owner_id,card_id,rating,created_at,review_count_before,last_review_at_before,due_at_before) VALUES(?,?,?,?,?,?,?,?)',operationId,user.id,cardId,rating,time,card.review_count,card.last_review_at,card.due_at);
     run('INSERT INTO review_undo(event_id,owner_id,session_id,card_id,before_json,queue_json,position,after_revision,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
       operationId,user.id,id,cardId,before,session.queue_json,session.position,session.revision+1,time);
     emitChange(user.id,'reviewed','card',cardId);
@@ -627,6 +628,25 @@ app.post('/api/v1/study/:id/undo',handler((req,res)=>{
   });
   res.json(result);
 }));
+app.post('/api/v1/study/:id/activity',handler((req,res)=>{
+  const user=account(req),sessionId=String(req.params.id);
+  const eventId=required(req.body?.eventId,'activity event ID',80),duration=Number(req.body?.durationMs);
+  if(!Number.isSafeInteger(duration)||duration<1||duration>15000)throw new ApiError(400,'Activity must be bounded to 15 seconds');
+  const result=transaction(()=>{
+    if(query('SELECT id FROM study_activity WHERE id=? AND owner_id=?',eventId,user.id))return {duplicate:true,acceptedMs:0};
+    const session=query<{status:string}>('SELECT status FROM study_sessions WHERE id=? AND owner_id=?',sessionId,user.id);
+    if(!session)throw new ApiError(404,'Study session not found');
+    if(session.status!=='active')throw new ApiError(409,'Study session is paused');
+    const start=now()-86400000;
+    const total=query<{total:number}>('SELECT COALESCE(SUM(duration_ms),0) AS total FROM study_activity WHERE owner_id=? AND created_at>=?',user.id,start)?.total||0;
+    if(total+duration>4*3600000)throw new ApiError(429,'Daily activity measurement cap reached');
+    run('INSERT INTO study_activity(id,owner_id,session_id,duration_ms,created_at) VALUES(?,?,?,?,?)',
+      eventId,user.id,sessionId,duration,now());
+    return {duplicate:false,acceptedMs:duration};
+  });
+  res.json(result);
+}));
+
 app.get('/api/v1/stats',handler((req,res)=>{
   const user=account(req);
   const zone=query<{timezone:string}>('SELECT timezone FROM user_preferences WHERE user_id=?',user.id)?.timezone||'UTC';
@@ -639,8 +659,13 @@ app.get('/api/v1/stats',handler((req,res)=>{
     const day=accountDayKey(card.due_at,zone);
     forecast[day]=(forecast[day]||0)+1;
   }
+  const candidates=list<{rating:number;created_at:number;undone_at:number|null;review_count_before:number|null;last_review_at_before:number|null;due_at_before:number|null;deck:string}>(
+    'SELECT r.rating,r.created_at,r.undone_at,r.review_count_before,r.last_review_at_before,r.due_at_before,d.name AS deck FROM review_events r JOIN cards c ON r.card_id=c.id JOIN decks d ON c.deck_id=d.id WHERE r.owner_id=? ORDER BY r.created_at DESC LIMIT 5000',user.id);
+  const retention=matureRetention(candidates);
+  const activeStudyMs=query<{total:number}>('SELECT COALESCE(SUM(duration_ms),0) AS total FROM study_activity WHERE owner_id=?',user.id)?.total||0;
   res.json({timezone:zone,reviews:reviewHistory.map(r=>({...r,day:accountDayKey(r.created_at,zone)})),
-    forecast:Object.entries(forecast).sort(([a],[b])=>a.localeCompare(b)).map(([day,due])=>({day,due}))});
+    forecast:Object.entries(forecast).sort(([a],[b])=>a.localeCompare(b)).map(([day,due])=>({day,due})),
+    matureRetention:retention,activeStudyMs});
 }));
 app.use('/api',(_req,res)=>res.status(404).json({error:'Not found'}));
 const dist=resolve(import.meta.dirname,'../dist');

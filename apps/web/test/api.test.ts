@@ -453,3 +453,30 @@ test('full-history broken references fail before any account data is written',as
   assert.equal((await request('/migration/full/commit','POST',{bundle:bad,confirmation:'IMPORT_MY_HISTORY'},user.cookie)).status,400);
   assert.equal((await request('/decks','GET',undefined,user.cookie).then(r=>r.json()) as {decks:unknown[]}).decks.length,0);
 });
+
+test('mature retention counts real eligible due reviews and bounded active study time',async()=>{
+  const account=await session('mature@example.com');
+  const deckId=(await (await request('/decks','POST',{name:'Mature Review'},account.cookie)).json() as {deck:{id:string}}).deck.id;
+  assert.equal((await request('/notes','POST',{deckId,type:'basic',front:'Old Q',back:'Old A',tags:''},account.cookie)).status,201);
+  const {DatabaseSync}=await import('node:sqlite');
+  const local=new DatabaseSync(join(root,'test.db'));
+  try{
+    const previous=Date.now()-3*86400000,due=Date.now()-86400000;
+    local.prepare('UPDATE cards SET review_count=2,stability=5,difficulty=4,fast_stability=2,last_review_at=?,due_at=? WHERE owner_id=?')
+      .run(previous,due,account.user.id);
+  }finally{local.close();}
+  const id=(await (await request('/study','POST',{deckId},account.cookie)).json() as {id:string}).id;
+  const session=await (await request('/study/'+id,'GET',undefined,account.cookie)).json() as {revision:number};
+  assert.equal((await request('/study/'+id+'/rate','POST',{rating:3,revision:session.revision,operationId:crypto.randomUUID()},account.cookie)).status,200);
+  const stats=await (await request('/stats','GET',undefined,account.cookie)).json() as {matureRetention:{eligible:number;recalled:number;observedPercent:number}};
+  assert.equal(stats.matureRetention.eligible,1);
+  assert.equal(stats.matureRetention.recalled,1);
+  assert.equal(stats.matureRetention.observedPercent,100);
+  assert.equal((await request('/study/'+id+'/activity','POST',{durationMs:16000,eventId:crypto.randomUUID()},account.cookie)).status,400);
+  const eventId=crypto.randomUUID();
+  assert.equal((await request('/study/'+id+'/activity','POST',{durationMs:15000,eventId},account.cookie)).status,200);
+  const replay=await request('/study/'+id+'/activity','POST',{durationMs:15000,eventId},account.cookie);
+  assert.equal((await replay.json() as {duplicate:boolean}).duplicate,true);
+  const current=await (await request('/stats','GET',undefined,account.cookie)).json() as {activeStudyMs:number};
+  assert.equal(current.activeStudyMs,15000);
+});
