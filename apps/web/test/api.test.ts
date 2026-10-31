@@ -480,3 +480,37 @@ test('mature retention counts real eligible due reviews and bounded active study
   const current=await (await request('/stats','GET',undefined,account.cookie)).json() as {activeStudyMs:number};
   assert.equal(current.activeStudyMs,15000);
 });
+
+test('portable owned image backup survives export and atomic restore across accounts',async()=>{
+  const first=await session('portable-export@example.com'),second=await session('portable-import@example.com');
+  const image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==';
+  const upload=await request('/media','POST',{data:image},first.cookie);
+  assert.equal(upload.status,201);
+  const {ref,sha256}=await upload.json() as {ref:string;sha256:string};
+  const name='Portable '+Date.now();
+  const deckId=(await (await request('/decks','POST',{name},first.cookie)).json() as {deck:{id:string}}).deck.id;
+  const masks=JSON.stringify([{id:7,x:0.15,y:0.2,width:0.3,height:0.4,answer:'Cat'}]);
+  const saved=await request('/notes','POST',{deckId,type:'image-occlusion',fields:[ref,masks,'Details'],tags:'pet'},first.cookie);
+  assert.equal(saved.status,201);
+  assert.equal((await request('/decks/'+deckId+'/portable','GET',undefined,second.cookie)).status,404);
+  const exportResult=await request('/decks/'+deckId+'/portable','GET',undefined,first.cookie);
+  assert.equal(exportResult.status,200);
+  const archive=await exportResult.json() as {media:{hash:string;base64:string}[];notes:{type:string;fields:string[]}[]};
+  assert.equal(archive.media[0]?.hash,sha256);
+  assert.equal(archive.notes[0]?.fields[1],masks);
+  const preview=await request('/portable/preview','POST',{bundle:archive},second.cookie);
+  assert.equal(preview.status,200);
+  assert.equal((await preview.json() as {assets:number;cards:number}).cards,1);
+  const tampered={...archive,media:[{...archive.media[0]!,base64:image.slice(0,-4)+'AAAA'}]};
+  assert.equal((await request('/portable/import','POST',{bundle:tampered,confirmation:'IMPORT_PORTABLE'},second.cookie)).status,400);
+  assert.equal((await request('/decks','GET',undefined,second.cookie).then(r=>r.json()) as {decks:unknown[]}).decks.length,0);
+  const imported=await request('/portable/import','POST',{bundle:archive,confirmation:'IMPORT_PORTABLE'},second.cookie);
+  assert.equal(imported.status,201);
+  const id=(await imported.json() as {deckId:string}).deckId;
+  const downloaded=await request('/media/'+sha256,'GET',undefined,second.cookie);
+  assert.equal(downloaded.status,200);
+  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),Buffer.from(image,'base64'));
+  const restored=await (await request('/decks/'+id,'GET',undefined,second.cookie)).json() as {notes:{fields:string[]}[]};
+  assert.equal(restored.notes[0]?.fields[1],masks);
+  assert.equal((await request('/portable/import','POST',{bundle:archive,confirmation:'IMPORT_PORTABLE'},second.cookie)).status,409);
+});

@@ -89,13 +89,14 @@ const routeDeckNew=createRoute({getParentRoute:()=>routeRoot,path:'/decks/new',c
 const routeDeckDetail=createRoute({getParentRoute:()=>routeRoot,path:'/decks/$deckId',component:DeckDetailPage});
 const routeNoteEdit=createRoute({getParentRoute:()=>routeRoot,path:'/notes/$noteId/edit',component:EditNotePage});
 const routeImport=createRoute({getParentRoute:()=>routeRoot,path:'/import',component:ImportPage});
+const routePortable=createRoute({getParentRoute:()=>routeRoot,path:'/portable/import',component:PortableImportPage});
 const routeHistory=createRoute({getParentRoute:()=>routeRoot,path:'/migration/full',component:HistoryMigrationPage});
 const routeCardNew=createRoute({getParentRoute:()=>routeRoot,path:'/cards/new',validateSearch:(search:Record<string,unknown>)=>({deckId:typeof search.deckId==='string'?search.deckId:undefined}),component:CardEditorPage});
 const routeStudy=createRoute({getParentRoute:()=>routeRoot,path:'/study',component:StudyStartPage});
 const routeStudySession=createRoute({getParentRoute:()=>routeRoot,path:'/study/$sessionId',component:StudySessionPage});
 const routeStats=createRoute({getParentRoute:()=>routeRoot,path:'/stats',component:StatsPage});
 const routeSettings=createRoute({getParentRoute:()=>routeRoot,path:'/settings',component:SettingsPage});
-const routeTree=routeRoot.addChildren([routeHome,routeLogin,routeVerify,routeDecks,routeDeckNew,routeDeckDetail,routeCardNew,routeNoteEdit,routeImport,routeHistory,routeStudy,routeStudySession,routeStats,routeSettings]);
+const routeTree=routeRoot.addChildren([routeHome,routeLogin,routeVerify,routeDecks,routeDeckNew,routeDeckDetail,routeCardNew,routeNoteEdit,routeImport,routePortable,routeHistory,routeStudy,routeStudySession,routeStats,routeSettings]);
 const router=createRouter({routeTree,defaultPreload:'intent'});
 declare module '@tanstack/react-router' {interface Register {router:typeof router;}}
 function Bongo({mood='happy',size='regular'}:{mood?:'happy'|'sleepy'|'thinking'|'hype';size?:'regular'|'large'}){
@@ -164,7 +165,7 @@ function HomePage(){
 function DeckCard({deck,index}:{deck:Deck;index:number}){const icons=['🧠','⌨️','☁️','🎮','📚','✨'];return <Link to="/decks/$deckId" params={{deckId:deck.id}} className={'deck-card deck-tone-'+index%4}><div className="deck-art"><span aria-hidden="true">{icons[index%icons.length]}</span><span className="deck-sparkle">✦</span></div><div className="deck-info"><h3>{deck.name}</h3><p>{deck.description||'Small cards. Big brain energy.'}</p><div className="pills"><span>{deck.cards??0} cards</span><span>{deck.due??0} due</span></div><div className="deck-bottom">Brain gains await <ArrowRight size={16}/></div></div></Link>;}
 function DecksPage(){const {data,loading,error}=useResource<{decks:Deck[]}>('/decks');const [term,setTerm]=useState('');if(loading)return <Loading/>;return <><Heading title="Your Decks" subtitle="Knowledge, neatly organized. Bongo approves."/><div className="section-heading"><h2>Deck Library</h2><div className="actions"><Link className="button secondary" to="/import"><Download size={18}/> Import</Link><Link className="button primary" to="/decks/new"><Plus size={18}/> New Deck</Link></div></div><Notice text={error}/><input className="filter" aria-label="Filter decks" placeholder="Filter by deck name..." value={term} onChange={e=>setTerm(e.target.value)}/><div className="deck-grid">{data?.decks.filter(d=>d.name.toLowerCase().includes(term.toLowerCase())).map((d,i)=><DeckCard key={d.id} deck={d} index={i}/>)}</div>{!data?.decks.length&&<Empty title="Nothing here yet" message="Create a deck for your first batch of brain gains."/>}</>;}
 function NewDeckPage(){const [form,setForm]=useImmer({name:'',description:''});const [error,setError]=useState('');const [busy,setBusy]=useState(false);const navigate=useNavigate();async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{const r=await api<{deck:{id:string}}>('/decks',{method:'POST',body:form});void navigate({to:'/decks/$deckId',params:{deckId:r.deck.id}});}catch(e){setError(String(e));}finally{setBusy(false);}}return <><Heading title="Create a New Deck" subtitle="A place for your questionable amount of knowledge."/><form className="card form-card" onSubmit={e=>void submit(e)}><label>Deck name<input required maxLength={120} value={form.name} onChange={e=>setForm(d=>{d.name=e.target.value;})} placeholder="e.g. Philosophy, TypeScript, Cats"/></label><label>Description (optional)<textarea maxLength={500} value={form.description} onChange={e=>setForm(d=>{d.description=e.target.value;})} placeholder="What are we learning?"/></label><Notice text={error}/><button className="primary" disabled={busy}>{busy?'Creating...':'Create Deck'}</button></form></>;}
-function DeckDetailPage(){const {deckId}=routeDeckDetail.useParams();const {data,loading,error}=useResource<{deck:Deck;notes:Note[]}>('/decks/'+encodeURIComponent(deckId));const navigate=useNavigate();if(loading)return <Loading/>;if(error)return <Notice text={error}/>;const deck=data!.deck;return <><Heading title={deck.name} subtitle={deck.description||'Every card counts.'}/><div className="actions"><Link className="button primary" to="/cards/new" search={{deckId}}><Plus/> Add Cards</Link><button className="secondary" onClick={()=>void startStudy(navigate,deckId)}><Play/> Study Deck</button><a className="button secondary" href={"/api/v1/decks/"+encodeURIComponent(deckId)+"/export"}><Download/> Export .deck</a></div><div className="section-heading"><h2>Notes ({data!.notes.length})</h2></div>{data!.notes.length?<div className="notes-list">{data!.notes.map(n=><div className="note-row card" key={n.id}><div><small className="pill">{n.type}</small><h3>{n.front}</h3><p>{n.back||'Cloze card'}</p><small>{n.tags}</small><div className="actions"><Link className="button secondary" to="/notes/$noteId/edit" params={{noteId:n.id}}>Edit Note</Link></div></div></div>)}</div>:<Empty title="No cards yet" message="Feed the knowledge goblin with your first note." action={<Link className="button primary" to="/cards/new" search={{deckId}}>Add Cards</Link>}/>}</>;}
+function DeckDetailPage(){const {deckId}=routeDeckDetail.useParams();const {data,loading,error}=useResource<{deck:Deck;notes:Note[]}>('/decks/'+encodeURIComponent(deckId));const navigate=useNavigate();if(loading)return <Loading/>;if(error)return <Notice text={error}/>;const deck=data!.deck;return <><Heading title={deck.name} subtitle={deck.description||'Every card counts.'}/><div className="actions"><Link className="button primary" to="/cards/new" search={{deckId}}><Plus/> Add Cards</Link><button className="secondary" onClick={()=>void startStudy(navigate,deckId)}><Play/> Study Deck</button><a className="button secondary" href={"/api/v1/decks/"+encodeURIComponent(deckId)+"/export"}><Download/> Export .deck</a><a className="button secondary" href={"/api/v1/decks/"+encodeURIComponent(deckId)+"/portable"}><Download/> Backup with Images</a></div><div className="section-heading"><h2>Notes ({data!.notes.length})</h2></div>{data!.notes.length?<div className="notes-list">{data!.notes.map(n=><div className="note-row card" key={n.id}><div><small className="pill">{n.type}</small><h3>{n.front}</h3><p>{n.back||'Cloze card'}</p><small>{n.tags}</small><div className="actions"><Link className="button secondary" to="/notes/$noteId/edit" params={{noteId:n.id}}>Edit Note</Link></div></div></div>)}</div>:<Empty title="No cards yet" message="Feed the knowledge goblin with your first note." action={<Link className="button primary" to="/cards/new" search={{deckId}}>Add Cards</Link>}/>}</>;}
 
 const NOTE_KINDS=['basic','reverse','optional-reverse','cloze','type-answer','multiple-choice','multiple-select','ordering','image-occlusion'] as const;
 const FIELD_NAMES:Record<string,string[]>={basic:['Front','Back'],reverse:['Front','Back'],'optional-reverse':['Front','Back','Add reverse card'],
@@ -411,6 +412,43 @@ function EditNotePage(){
       <div className="actions"><button className="primary" disabled={busy||!!conflict}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Check for Updates</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:lastDeckId.current}}>Back to Deck</Link></div>
     </form></>;
 }
+function PortableImportPage(){
+  const navigate=useNavigate();
+  const [archive,setArchive]=useState<unknown>(null);
+  const [preview,setPreview]=useState<{name:string;notes:number;cards:number;assets:number;checksum:string}|null>(null);
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
+  async function select(file:File|undefined){
+    if(!file)return;
+    setArchive(null);setPreview(null);setError('');
+    if(file.size>12*1024*1024){setError('Archive must be 12 MiB or smaller.');return;}
+    setBusy(true);
+    try{
+      const value=JSON.parse(await file.text()) as unknown;
+      const result=await api<{name:string;notes:number;cards:number;assets:number;checksum:string}>('/portable/preview',{method:'POST',body:{bundle:value}});
+      setArchive(value);setPreview(result);
+    }catch(e){setError(String(e));}finally{setBusy(false);}
+  }
+  async function commit(){
+    if(!archive||!preview)return;setBusy(true);setError('');
+    try{
+      const saved=await api<{deckId:string}>('/portable/import',{method:'POST',body:{bundle:archive,confirmation:'IMPORT_PORTABLE'}});
+      void navigate({to:'/decks/$deckId',params:{deckId:saved.deckId}});
+    }catch(e){setError(String(e));}finally{setBusy(false);}
+  }
+  return <><Heading title="Restore Portable Deck" subtitle="Bring the cards and their attached images. No hosted storage needed."/>
+    <div className="card form-card">
+      <label>Choose your Vutadex portable JSON backup
+        <input type="file" accept=".json,application/json" onChange={e=>void select(e.target.files?.[0])}/>
+      </label>
+      <p className="muted">Version 1 restores card content, masks and verified image bytes locally. Existing schedules and review history do not transfer. Your original files are not modified.</p>
+      {preview&&<section role="status" className="success"><strong>{preview.name}</strong> — {preview.notes} notes, {preview.cards} cards, {preview.assets} verified images.
+        <p className="muted">SHA-256: {preview.checksum}</p>
+        <button type="button" className="primary" disabled={busy} onClick={()=>void commit()}>Confirm Portable Restore</button>
+      </section>}
+      <Notice text={error}/>
+    </div></>;
+}
+
 function ImportPage(){
   const navigate=useNavigate();
   const [form,setForm]=useImmer({format:'deck',name:'',content:''});
@@ -426,7 +464,7 @@ function ImportPage(){
     <p className="muted">Content-only import. All cards begin with fresh schedules. Unrecognized note types are rejected before saving.</p>
     <button className="primary" onClick={()=>void requestPreview()} disabled={!form.content||busy}>Preview Import</button>
     {preview&&<div className="success"><strong>{preview.name}</strong> — {preview.notes} notes, {preview.cards} generated cards. No review history will transfer.<div className="actions"><button className="primary" onClick={()=>void importConfirmed()} disabled={busy}>Confirm Import</button></div></div>}
-    <Notice text={error}/></div></>;
+    <Notice text={error}/><p><Link to="/portable/import">Restore a deck with attached images</Link></p></div></>;
 }
 function StudyStartPage(){const {data,loading}=useResource<Overview>('/overview');const navigate=useNavigate();const [busy,setBusy]=useState(false);const [error,setError]=useState('');async function start(id?:string){setBusy(true);setError('');try{await startStudy(navigate,id);}catch(e){setError(String(e));}finally{setBusy(false);}}return <><Heading title="Study Time!" subtitle="Same cards. A smarter you. Bongo believes in you." mood="hype"/><div className="section-heading"><h2>Choose your battlefield</h2></div><Notice text={error}/><button className="primary" disabled={busy} onClick={()=>void start()}><Play/> Study All Due Cards</button>{loading?<Loading/>:<div className="deck-grid study-decks">{data?.decks.map((d,i)=><button key={d.id} className={'deck-card deck-tone-'+i%4} disabled={busy} onClick={()=>void start(d.id)}><div className="deck-info"><h3>{d.name}</h3><p>{d.due||0} cards due now</p><div className="deck-bottom">Study this deck <ArrowRight/></div></div></button>)}</div>}</>;}
 async function startStudy(navigate:ReturnType<typeof useNavigate>,deckId?:string){const r=await api<{id:string}>('/study',{method:'POST',body:deckId?{deckId}:{}});await navigate({to:'/study/$sessionId',params:{sessionId:r.id}});}
