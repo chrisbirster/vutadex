@@ -122,12 +122,12 @@ The references define a warm, illustrated product: cream surfaces, mint/teal nav
 
 | Reference | Intended screen |
 |---|---|
-| `ChatGPT Image Oct 30, 2026, 09_23_07 PM-1.png` | Home overview, deck grid/list, study/create/import actions, activity |
-| `ChatGPT Image Oct 30, 2026, 09_23_08 PM-2.png` | Study card, reveal, four ratings, interval previews, session progress |
-| `ChatGPT Image Oct 30, 2026, 09_23_08 PM-3.png` | Deck-aware card/note creation, type selection, content fields, live preview |
-| `ChatGPT Image Oct 30, 2026, 09_23_09 PM-4.png` | Statistics, review activity, retention, due forecast, per-deck performance |
+| [wireframe1.png](wireframe1.png) | Home overview, deck grid/list, study/create/import actions, activity |
+| [wireframe2.png](wireframe2.png) | Study card, reveal, four ratings, interval previews, session progress |
+| [wireframe3.png](wireframe3.png) | Deck-aware card/note creation, type selection, content fields, live preview |
+| [wireframe4.png](wireframe4.png) | Statistics, review activity, retention, due forecast, per-deck performance |
 
-Original reference images are in the user's Downloads folder and attached to this planning conversation. M3 should place approved reference/production assets in the repository with clear naming and provenance.
+The supplied reference images are committed alongside this plan as `docs/wireframe1.png` through `docs/wireframe4.png`. M3 should prepare production assets separately with clear naming and provenance.
 
 Proposed routes:
 
