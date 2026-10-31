@@ -542,11 +542,11 @@ app.get('/api/v1/study/:id',handler((req,res)=>{
       revision++;emitChange(user.id,'updated','study',id);
     }
     const current=queue[session.position];
-    const card=current?query<CardRow & {note_type:string;fields_json:string|null}>('SELECT c.*,n.type AS note_type,n.fields_json AS fields_json FROM cards c JOIN notes n ON n.id=c.note_id AND n.owner_id=c.owner_id WHERE c.id=? AND c.owner_id=? AND c.retired=0',current,user.id):undefined;
+    const card=current?query<CardRow & {note_type:string;fields_json:string|null;variant:string}>('SELECT c.*,n.type AS note_type,n.fields_json AS fields_json FROM cards c JOIN notes n ON n.id=c.note_id AND n.owner_id=c.owner_id WHERE c.id=? AND c.owner_id=? AND c.retired=0',current,user.id):undefined;
     return {session,queue,revision,card};
   });
   const card=result.card;
-  res.json({card:card?{id:card.id,front:card.front,back:card.back,due_at:card.due_at,presentation:studyPresentation(card.note_type,card.fields_json,(card as CardRow & {variant:string}).variant)}:null,
+  res.json({card:card?{id:card.id,front:card.front,back:card.back,due_at:card.due_at,presentation:studyPresentation(card.note_type,card.fields_json,card.variant)}:null,
     position:result.session.position,total:result.queue.length,revision:result.revision,paused:result.session.status==='paused',
     waiting:card?Math.max(0,card.due_at-now()):0,
     intervals:card?intervalPreviews(currentState(card),card.last_review_at,now()):[]});
