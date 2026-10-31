@@ -44,7 +44,7 @@ export function signedSesRequest(config:MailConfig,to:string,link:string,date=ne
   const signature=createHmac('sha256',key).update(stringToSign).digest('hex');
   return {
     url:'https://'+host+'/v2/email/outbound-emails',
-    headers:{...headers,authorization:'AWS4-HMAC-SHA256 Credential='+config.accessKeyId+'/'+scope+', SignedHeaders='+signedHeaders+', Signature='+signature},
+    headers:{...headers,authorization:'AWS4-HMAC-SHA256 Credential='+config.accessKeyId+'/'+scope+', SignedHeaders='+signedHeaders+', Signature='+signature} as Record<string,string>,
     body
   };
 }
