@@ -9,7 +9,7 @@ export default defineConfig({
   timeout:40000,expect:{timeout:10000},
   reporter:[['list'],['html',{open:'never'}]],
   use:{baseURL:base,trace:'retain-on-failure',screenshot:'only-on-failure'},
-  projects:[{name:'chromium',use:{...devices['Desktop Chrome']}}],
+  projects:[{name:'chromium',use:{...devices['Desktop Chrome'],channel:'chrome'}}],
   webServer:[
     {command:'npm run server --workspace @vutadex/web',url:'http://127.0.0.1:3001/api/v1/health',
       env:{NODE_ENV:'test',APP_ORIGIN:base,PORT:'3001',VUTADEX_DB:database,LOG_LEVEL:'silent'},

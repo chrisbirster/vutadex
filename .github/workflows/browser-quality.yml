@@ -27,7 +27,6 @@ jobs:
       - run: node --experimental-strip-types apps/web/scripts/perf-check.ts
       - name: Install pinned isolated browser test tooling (does not change the lockfile)
         run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund @playwright/test@1.56.1 @axe-core/playwright@4.10.2
-      - run: npx playwright install chromium
       - run: npx playwright test -c apps/web/playwright.config.mjs
       - uses: actions/upload-artifact@v4
         if: failure()
