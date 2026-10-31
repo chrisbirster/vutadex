@@ -340,10 +340,12 @@ function EditNotePage(){
   const [initialized,setInitialized]=useState(false);
   const [message,setMessage]=useState(''),[failure,setFailure]=useState(''),[busy,setBusy]=useState(false);
   const base=useRef<EditableNote|null>(null),loadedRevision=useRef<number|null>(null);
+  const lastDeckId=useRef('');
   const formRef=useRef(form);formRef.current=form;
   const [conflict,setConflict]=useState<{server:RemoteNote;local:EditableNote;chosen:(keyof EditableNote)[]}|null>(null);
   useEffect(()=>{
     if(!data?.note)return;
+    lastDeckId.current=data.note.deckId;
     if(loadedRevision.current===null){
       setForm({...toEditable(data.note),revision:data.note.revision});
       base.current=toEditable(data.note);loadedRevision.current=data.note.revision;setInitialized(true);
@@ -406,7 +408,7 @@ function EditNotePage(){
           <button type="button" className="primary" disabled={busy} onClick={()=>void applyConflict(true)}>Reapply selected changes</button></div>
       </section>}
       <Notice text={failure}/>{message&&<div className="success" role="status">{message}</div>}
-      <div className="actions"><button className="primary" disabled={busy||!!conflict}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Check for Updates</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:data!.note.deckId}}>Back to Deck</Link></div>
+      <div className="actions"><button className="primary" disabled={busy||!!conflict}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Check for Updates</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:lastDeckId.current}}>Back to Deck</Link></div>
     </form></>;
 }
 function ImportPage(){
