@@ -390,8 +390,8 @@ function EditNotePage(){
       else setFailure(String(e));
     }finally{setBusy(false);}
   }
-  if(loading&&!initialized)return <Loading/>;
   if(error&&!initialized)return <Notice text={error}/>;
+  if(!initialized)return <Loading/>;
   return <><Heading title="Edit Note" subtitle="Fine-tune your knowledge without losing your brain gains."/>
     <form className="card form-card" onSubmit={e=>void save(e)}>
       <label>Note type<select value={form.type} onChange={e=>setForm(d=>{d.type=e.target.value;d.fields=fieldsForEditor(e.target.value,d.front,d.back);})}>{NOTE_KINDS.map(kind=><option key={kind} value={kind}>{kind.replaceAll('-',' ')}</option>)}</select></label>
