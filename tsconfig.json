@@ -10,7 +10,10 @@
     "skipLibCheck": true,
     "types": [
       "node"
-    ]
+    ],
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true
   },
   "include": [
     "index.ts",

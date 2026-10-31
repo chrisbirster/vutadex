@@ -206,9 +206,9 @@ test('session validation, stale queue, skipping and undo without history', () =>
 test('migration rejects a future version without mutating it',()=>{
   const db=new DatabaseSync(':memory:');
   try{
-    db.exec('PRAGMA user_version=5');
+    db.exec('PRAGMA user_version=6');
     assert.throws(()=>migrate(db),/newer version/);
-    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version,5);
+    assert.equal((db.prepare('PRAGMA user_version').get() as {user_version:number}).user_version,6);
   }finally{db.close();}
 });
 

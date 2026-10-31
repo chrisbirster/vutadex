@@ -23,7 +23,7 @@ On the canonical integration branch after porting the tests, the preliminary Ubu
 
 - Unit: FSRS golden/reference vectors, deck/card/note operations, selection/occlusion, scheduling, input and error boundaries, media integrity and path handling.
 - Integration: real multi-process CLI operations, persistent SQLite, note/card/study workflows, command argument matrix, packaged CLI.
-- Regression: schema versions 1–4 and safe upgrades, existing review history and card IDs, study queue resume, media corruption, and migration file enumeration/order.
+- Regression: schema versions 1–5 and safe upgrades, existing review history and card IDs, study queue resume, media corruption, and migration file enumeration/order.
 - Interactive: deterministic test injection through `commands/terminal.ts` *without* replacing Cleanup v3's per-subcommand structure. Raw study keyboard entry is separately tested.
 
 The test suite never relies on an existing user profile or production database.
