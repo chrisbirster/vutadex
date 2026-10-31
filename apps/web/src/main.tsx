@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useImmer } from 'use-immer';
 import { Home, Layers3, Play, SquarePlus, ChartNoAxesColumnIncreasing, Settings, Search, LogOut, Sparkles, Flame, BookOpen, Plus, ArrowRight, Eye, RotateCcw, Check, Clock, Target, ChevronLeft, ChevronRight, Keyboard, Mail, LoaderCircle, Brain, Menu, X, Download, PanelLeft, CircleHelp } from 'lucide-react';
+import {mergeEdits,applySelections,type EditableNote} from './merge.ts';
 import './style.css';
 
 type User = {id:string;email:string};
@@ -14,6 +15,8 @@ type Study = {card:{id:string;front:string;back:string;due_at:number}|null;posit
 type SessionState = {user:User|null;loading:boolean;error:string};
 type SessionContextValue={session:SessionState;refresh:()=>Promise<void>};
 const SessionContext=createContext<SessionContextValue|null>(null);
+function broadcastSessionChange(){if(typeof BroadcastChannel!=='undefined'){const c=new BroadcastChannel('vutadex:session');c.postMessage('session-changed');c.close();}}
+
 const AccountChangeContext=createContext(0);
 function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>Promise<void>;children:React.ReactNode}){
   const [state,setState]=useImmer({cursor:0,revision:0,connected:false});
@@ -54,11 +57,12 @@ function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>
   return <AccountChangeContext.Provider value={state.revision}>{children}</AccountChangeContext.Provider>;
 }
 function useSession(){const value=useContext(SessionContext);if(!value)throw new Error('SessionProvider missing');return value;}
+class ApiRequestError extends Error {constructor(readonly status:number,message:string){super(message);}}
 async function api<T>(path:string, options?:{method?:string;body?:unknown;signal?:AbortSignal}):Promise<T>{
   const response=await fetch('/api/v1'+path,{method:options?.method||'GET',credentials:'same-origin',signal:options?.signal,headers:options?.body===undefined?{}:{'content-type':'application/json'},body:options?.body===undefined?undefined:JSON.stringify(options.body)});
   let payload:unknown;
   try{payload=await response.json();}catch{throw new Error('Unable to reach Vutadex. Check your connection.');}
-  if(!response.ok)throw new Error(typeof payload==='object'&&payload!==null&&'error' in payload?String((payload as {error:unknown}).error):'Request failed');
+  if(!response.ok)throw new ApiRequestError(response.status,typeof payload==='object'&&payload!==null&&'error' in payload?String((payload as {error:unknown}).error):'Request failed');
   return payload as T;
 }
 function useResource<T>(url:string|null){
@@ -115,6 +119,7 @@ function Application(){
   const [session,setSession]=useImmer<SessionState>({user:null,loading:true,error:''});
   const refresh=async()=>{try{const r=await api<{user:User}>('/session');setSession({user:r.user,loading:false,error:''});}catch{setSession({user:null,loading:false,error:''});}};
   useEffect(()=>{void refresh();},[]);
+  useEffect(()=>{if(typeof BroadcastChannel==='undefined')return;const c=new BroadcastChannel('vutadex:session');c.onmessage=()=>void refresh();return()=>c.close();},[]);
   const path=useRouterState({select:s=>s.location.pathname});
   const [mobileNav,setMobileNav]=useState(false);
   const authPage=path==='/login'||path==='/auth/verify';
@@ -123,7 +128,7 @@ function Application(){
   if(session.loading)return <div className="center-screen"><Bongo/><p>Waking up Bongo...</p></div>;
   if(!session.user&&!authPage)return <LoginPage/>;
   if(authPage)return <SessionContext.Provider value={{session,refresh}}><main className="auth-background"><Outlet/></main></SessionContext.Provider>;
-  const signOut=async()=>{await api('/logout',{method:'POST'});setSession({user:null,loading:false,error:''});void navigate({to:'/login'});};
+  const signOut=async()=>{await api('/logout',{method:'POST'});broadcastSessionChange();setSession({user:null,loading:false,error:''});void navigate({to:'/login'});};
   return <SessionContext.Provider value={{session,refresh}}>
     <AccountSyncProvider owner={session.user?.id||''} refresh={refresh}><div className="app">
       <aside className={'sidebar '+(mobileNav?'sidebar-open':'')}>
@@ -242,6 +247,44 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
   const [draftReady,setDraftReady]=useState(false),[draftRevision,setDraftRevision]=useState(0);
   const [draftStatus,setDraftStatus]=useState('Loading draft...'),[draftConflict,setDraftConflict]=useState(false);
   const lastSaved=useRef(''),saving=useRef(false);
+  type DraftFields={deckId:string;type:string;front:string;back:string;fields:string[];tags:string;revision:number};
+  const [draftCompare,setDraftCompare]=useState<{local:DraftFields;server:DraftFields|null;chosen:(keyof EditableNote)[]}|null>(null);
+  async function refreshDraftConflict(){
+    const response=await api<{draft:DraftFields|null}>('/drafts/new');
+    const local={...formRef.current,revision:draftRevision};
+    const base=lastSaved.current?JSON.parse(lastSaved.current) as DraftFields:local;
+    const merged=mergeEdits(toEditable(base),toEditable(local),toEditable(response.draft||{...local,fields:['',''],front:'',back:'',tags:''}));
+    setDraftCompare({local,server:response.draft,chosen:merged.changes});
+    setDraftConflict(true);
+    setDraftStatus('Conflict: your draft is not saved. Compare both versions before choosing.');
+  }
+  const formRef=useRef(form);formRef.current=form;
+  async function resolveDraftConflict(useLocal:boolean){
+    if(!draftCompare)return;
+    setBusy(true);
+    try{
+      if(!useLocal){
+        const remote=draftCompare.server;
+        if(remote){
+          const state={deckId:remote.deckId,type:remote.type,front:remote.front,back:remote.back,fields:remote.fields||[remote.front,remote.back],tags:remote.tags};
+          setForm(state);lastSaved.current=JSON.stringify(state);setDraftRevision(remote.revision);
+        }else{
+          const cleared={deckId:'',type:'basic',front:'',back:'',fields:['',''],tags:''};
+          setForm(cleared);lastSaved.current=JSON.stringify(cleared);setDraftRevision(0);
+        }
+      }else{
+        const local=draftCompare.local;
+        const remote=draftCompare.server||{...local,front:'',back:'',fields:['',''],tags:'',revision:0};
+        const merged=applySelections(toEditable(remote),toEditable(local),draftCompare.chosen);
+        const selected={...merged,deckId:local.deckId};
+        const response=await api<{revision:number}>('/drafts/new',{method:'PUT',body:{...selected,revision:remote.revision}});
+        setForm(selected);lastSaved.current=JSON.stringify(selected);setDraftRevision(response.revision);
+      }
+      setDraftCompare(null);setDraftConflict(false);setDraftStatus('Draft conflict resolved.');
+    }catch(e){setDraftStatus(String(e));if(e instanceof ApiRequestError&&e.status===409)await refreshDraftConflict();}
+    finally{setBusy(false);}
+  }
+
   useEffect(()=>{
     if(draftReady||draft.loading)return;
     const value=draft.data?.draft;
@@ -259,7 +302,7 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
       saving.current=true;setDraftStatus('Saving draft...');
       void api<{revision:number}>('/drafts/new',{method:'PUT',body:{...form,revision:draftRevision}})
         .then(result=>{lastSaved.current=serialized;setDraftRevision(result.revision);setDraftStatus('Draft saved across devices');})
-        .catch(error=>{setDraftConflict(true);setDraftStatus(String(error));})
+        .catch(error=>{if(error instanceof ApiRequestError&&error.status===409)void refreshDraftConflict();else{setDraftConflict(true);setDraftStatus('Unsaved: '+String(error));}})
         .finally(()=>{saving.current=false;});
     },650);
     return()=>window.clearTimeout(timeout);
@@ -267,30 +310,103 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
 
   useEffect(()=>{if(deckId)setForm(s=>{s.deckId=deckId;});},[deckId,setForm]);
   async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{const result=await api<{generatedCards:number}>('/notes',{method:'POST',body:form});setMessage('Saved! '+result.generatedCards+' card(s) ready to study.');setForm(s=>{s.front='';s.back='';s.fields=fieldsForEditor(s.type,'','');s.tags='';});const cleared={...form,front:'',back:'',fields:fieldsForEditor(form.type,'',''),tags:''};lastSaved.current=JSON.stringify(cleared);if(draftRevision>0){void api('/drafts/new',{method:'DELETE',body:{revision:draftRevision}}).then(()=>{setDraftRevision(0);setDraftStatus('Card saved. Draft cleared.');}).catch(()=>{setDraftConflict(true);setDraftStatus('Card saved, but the draft changed elsewhere. Reload before editing again.');});}}catch(e){setError(String(e));}finally{setBusy(false);}}
-  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&<button type="button" className="secondary" onClick={()=>{setDraftReady(false);draft.reload();}}>Reload Server Draft (discards local edits)</button>}<Notice text={error}/>{message&&<div className="success" role="status">{message}</div>}<button disabled={busy} className="primary"><Sparkles size={18}/> {busy?'Saving...':'Save Card'}</button></form><aside className="editor-side"><div className="card preview"><h3><Eye size={20}/> Live Preview</h3><div className="preview-front">{form.type==='image-occlusion'&&form.fields[0]?.startsWith('deez-media://sha256:')?<img src={'/api/v1/media/'+form.fields[0].slice(-64)} alt="Uploaded flashcard visual" style={{maxWidth:'100%'}}/>:form.front||'Your card front will appear here...'}</div><div className="preview-back">{form.back||'Your answer will appear here...'}</div><Bongo mood="happy"/></div><div className="card"><h3><CircleHelp size={20}/> Card Writing Tips</h3><p>One idea per card. Short, specific questions stick.</p><p>Use your own words. Future you says thanks.</p><p>Cloze example: <code>{'{{c1::answer}}'}</code>.</p></div></aside></div></>;
+  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&draftCompare&&<section className="card conflict" role="alert" aria-label="Concurrent draft edit">
+  <h3>Draft conflict</h3><p>Your edits are still available locally. Another device saved a different draft.</p>
+  <DifferenceTable local={draftCompare.local} server={draftCompare.server||{...draftCompare.local,front:'',back:'',fields:['',''],tags:''}}/>
+  {(['type','fields','tags'] as const).map(key=><label key={key} className="checkbox-line"><input type="checkbox" checked={draftCompare.chosen.includes(key)} onChange={e=>setDraftCompare(c=>c?{...c,chosen:e.target.checked?[...c.chosen,key]:c.chosen.filter(x=>x!==key)}:null)}/> Keep my {key}</label>)}
+  <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void resolveDraftConflict(false)}>Use server draft</button>
+  <button type="button" className="primary" disabled={busy} onClick={()=>void resolveDraftConflict(true)}>Reapply selected fields</button></div>
+</section>}
+{draftConflict&&!draftCompare&&<button type="button" className="secondary" onClick={()=>void refreshDraftConflict()}>Check latest draft</button>}<Notice text={error}/>{message&&<div className="success" role="status">{message}</div>}<button disabled={busy} className="primary"><Sparkles size={18}/> {busy?'Saving...':'Save Card'}</button></form><aside className="editor-side"><div className="card preview"><h3><Eye size={20}/> Live Preview</h3><div className="preview-front">{form.type==='image-occlusion'&&form.fields[0]?.startsWith('deez-media://sha256:')?<img src={'/api/v1/media/'+form.fields[0].slice(-64)} alt="Uploaded flashcard visual" style={{maxWidth:'100%'}}/>:form.front||'Your card front will appear here...'}</div><div className="preview-back">{form.back||'Your answer will appear here...'}</div><Bongo mood="happy"/></div><div className="card"><h3><CircleHelp size={20}/> Card Writing Tips</h3><p>One idea per card. Short, specific questions stick.</p><p>Use your own words. Future you says thanks.</p><p>Cloze example: <code>{'{{c1::answer}}'}</code>.</p></div></aside></div></>;
+}
+
+
+function DifferenceTable({local,server}:{local:EditableNote;server:EditableNote}){
+  return <table className="difference-table"><thead><tr><th>Field</th><th>Your unsaved changes</th><th>Latest server content</th></tr></thead><tbody>
+    {(['type','fields','tags'] as const).map(key=><tr key={key}><th scope="row">{key}</th>
+      <td><pre>{JSON.stringify(local[key],null,2)}</pre></td>
+      <td><pre>{JSON.stringify(server[key],null,2)}</pre></td></tr>)}
+  </tbody></table>;
+}
+function toEditable(input:{type:string;front:string;back:string;fields:string[];tags:string}):EditableNote{
+  return {type:input.type,front:input.front,back:input.back,fields:[...input.fields],tags:input.tags};
 }
 
 function EditNotePage(){
   const {noteId}=routeNoteEdit.useParams();
-  const {data,loading,error,reload}=useResource<{note:{id:string;deckId:string;type:string;front:string;back:string;fields:string[];tags:string;revision:number}}>('/notes/'+encodeURIComponent(noteId));
+  type RemoteNote=EditableNote&{id:string;deckId:string;revision:number};
+  const {data,loading,error,reload}=useResource<{note:RemoteNote}>('/notes/'+encodeURIComponent(noteId));
   const [form,setForm]=useImmer({type:'basic',front:'',back:'',fields:['',''],tags:'',revision:0});
   const [initialized,setInitialized]=useState(false);
   const [message,setMessage]=useState(''),[failure,setFailure]=useState(''),[busy,setBusy]=useState(false);
-  useEffect(()=>{if(data?.note){setForm({type:data.note.type,front:data.note.front,back:data.note.back,fields:data.note.fields||[data.note.front,data.note.back],tags:data.note.tags,revision:data.note.revision});setInitialized(true);}},[data,setForm]);
-  async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setFailure('');setMessage('');try{
-    const result=await api<{note:{revision:number}}>('/notes/'+encodeURIComponent(noteId),{method:'PUT',body:form});
-    setForm(d=>{d.revision=result.note.revision;});
-    setMessage('Saved. Existing generated cards kept their review history.');
-  }catch(e){setFailure(String(e));}finally{setBusy(false);}}
-  if(loading||!initialized)return <Loading/>;
-  if(error)return <Notice text={error}/>;
+  const base=useRef<EditableNote|null>(null),loadedRevision=useRef<number|null>(null);
+  const formRef=useRef(form);formRef.current=form;
+  const [conflict,setConflict]=useState<{server:RemoteNote;local:EditableNote;chosen:(keyof EditableNote)[]}|null>(null);
+  useEffect(()=>{
+    if(!data?.note)return;
+    if(loadedRevision.current===null){
+      setForm({...toEditable(data.note),revision:data.note.revision});
+      base.current=toEditable(data.note);loadedRevision.current=data.note.revision;setInitialized(true);
+    }else if(data.note.revision!==loadedRevision.current){
+      const your=toEditable(formRef.current);
+      const changed=mergeEdits(base.current||your,your,data.note);
+      setConflict({server:data.note,local:your,chosen:changed.changes});
+      setFailure('This note changed on another device. Your work is preserved below.');
+    }
+  },[data,setForm]);
+  async function refreshConflict(local:EditableNote){
+    const response=await api<{note:RemoteNote}>('/notes/'+encodeURIComponent(noteId));
+    const changed=mergeEdits(base.current||local,local,response.note);
+    setConflict({server:response.note,local,chosen:changed.changes});
+  }
+  async function save(e:React.FormEvent){
+    e.preventDefault();if(conflict)return;setBusy(true);setFailure('');setMessage('');
+    try{
+      const result=await api<{note:{revision:number}}>('/notes/'+encodeURIComponent(noteId),{method:'PUT',body:form});
+      const saved=toEditable(form);setForm(d=>{d.revision=result.note.revision;});
+      base.current=saved;loadedRevision.current=result.note.revision;
+      setMessage('Saved. Existing generated cards kept their review history.');
+    }catch(e){
+      if(e instanceof ApiRequestError&&e.status===409){
+        try{await refreshConflict(toEditable(form));}catch(err){setFailure(String(err));}
+      }else setFailure(String(e));
+    }finally{setBusy(false);}
+  }
+  async function applyConflict(useLocal:boolean){
+    if(!conflict)return;setBusy(true);setFailure('');
+    const server=conflict.server;
+    try{
+      if(!useLocal){
+        setForm({...toEditable(server),revision:server.revision});base.current=toEditable(server);
+        loadedRevision.current=server.revision;setConflict(null);setMessage('Server version restored. Local changes were discarded by your choice.');
+      }else{
+        const merged=applySelections(server,conflict.local,conflict.chosen);
+        const saved=await api<{note:{revision:number}}>('/notes/'+encodeURIComponent(noteId),{method:'PUT',body:{...merged,revision:server.revision}});
+        setForm({...merged,revision:saved.note.revision});base.current=merged;
+        loadedRevision.current=saved.note.revision;setConflict(null);setMessage('Your selected changes were reapplied to the latest version.');
+      }
+    }catch(e){
+      if(e instanceof ApiRequestError&&e.status===409)await refreshConflict(conflict.local);
+      else setFailure(String(e));
+    }finally{setBusy(false);}
+  }
+  if(loading&&!initialized)return <Loading/>;
+  if(error&&!initialized)return <Notice text={error}/>;
   return <><Heading title="Edit Note" subtitle="Fine-tune your knowledge without losing your brain gains."/>
     <form className="card form-card" onSubmit={e=>void save(e)}>
       <label>Note type<select value={form.type} onChange={e=>setForm(d=>{d.type=e.target.value;d.fields=fieldsForEditor(e.target.value,d.front,d.back);})}>{NOTE_KINDS.map(kind=><option key={kind} value={kind}>{kind.replaceAll('-',' ')}</option>)}</select></label>
-      <CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags<input maxLength={300} value={form.tags} onChange={e=>setForm(d=>{d.tags=e.target.value;})}/></label>
-      <p className="muted">Revision {form.revision}. Saving uses optimistic concurrency; a concurrent edit is rejected instead of overwritten.</p>
+      <CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/>
+      <label>Tags<input maxLength={300} value={form.tags} onChange={e=>setForm(d=>{d.tags=e.target.value;})}/></label>
+      <p className="muted">Revision {form.revision}. Overlapping changes require an explicit choice.</p>
+      {conflict&&<section className="card conflict" role="alert" aria-label="Concurrent note edit">
+        <h3>Two devices edited this note</h3><p>Your unsaved text has not been discarded. Select the fields to reapply on top of the latest server version.</p>
+        <DifferenceTable local={conflict.local} server={conflict.server}/>
+        {(['type','fields','tags'] as const).map(k=><label className="checkbox-line" key={k}><input type="checkbox" checked={conflict.chosen.includes(k)} onChange={e=>setConflict(c=>c?{...c,chosen:e.target.checked?[...c.chosen,k]:c.chosen.filter(x=>x!==k)}:null)}/> Reapply my {k}</label>)}
+        <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void applyConflict(false)}>Use latest server version</button>
+          <button type="button" className="primary" disabled={busy} onClick={()=>void applyConflict(true)}>Reapply selected changes</button></div>
+      </section>}
       <Notice text={failure}/>{message&&<div className="success" role="status">{message}</div>}
-      <div className="actions"><button className="primary" disabled={busy}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Reload Latest</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:data!.note.deckId}}>Back to Deck</Link></div>
+      <div className="actions"><button className="primary" disabled={busy||!!conflict}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Check for Updates</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:data!.note.deckId}}>Back to Deck</Link></div>
     </form></>;
 }
 function ImportPage(){
@@ -389,7 +505,7 @@ function SettingsPage(){
     try{await api('/preferences',{method:'PUT',body:{timezone}});setMessage('Timezone saved. Daily review boundaries will now follow '+timezone+'.');reloadPreferences();}
     catch(e){setError(String(e));}
   }
-  async function signOutAll(){if(!window.confirm('Sign out from every device?'))return;try{await api('/sessions/revoke-all',{method:'POST'});await refresh();void navigate({to:'/login'});}catch(e){setError(String(e));reloadDevices();}}
+  async function signOutAll(){if(!window.confirm('Sign out from every device?'))return;try{await api('/sessions/revoke-all',{method:'POST'});broadcastSessionChange();await refresh();void navigate({to:'/login'});}catch(e){setError(String(e));reloadDevices();}}
   async function revoke(id:string){setError('');try{await api('/sessions/revoke',{method:'POST',body:{id}});reloadDevices();await refresh();}catch(e){setError(String(e));}}
   return <><Heading title="Settings" subtitle="Your cards, your account, your rules."/>
     <div className="card form-card">
