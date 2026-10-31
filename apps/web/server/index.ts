@@ -125,6 +125,14 @@ app.post('/api/v1/logout',handler((req,res)=>{
 app.get('/api/v1/sessions',handler((req,res)=>{
   const user=account(req);res.json({sessions:list('SELECT substr(token_hash,1,12) AS id,created_at,last_seen,expires_at FROM sessions WHERE user_id=? ORDER BY last_seen DESC',user.id)});
 }));
+app.post('/api/v1/sessions/revoke',handler((req,res)=>{
+  const user=account(req),id=required(req.body?.id,'session ID',12);
+  if(!/^[0-9a-f]{12}$/.test(id))throw new ApiError(400,'Invalid session ID');
+  const matched=list<{token_hash:string}>('SELECT token_hash FROM sessions WHERE user_id=? AND substr(token_hash,1,12)=?',user.id,id);
+  if(matched.length!==1)throw new ApiError(404,'Session not found');
+  run('DELETE FROM sessions WHERE user_id=? AND token_hash=?',user.id,matched[0]!.token_hash);
+  res.json({ok:true});
+}));
 app.post('/api/v1/sessions/revoke-all',handler((req,res)=>{
   const user=account(req);run('DELETE FROM sessions WHERE user_id=?',user.id);
   res.clearCookie(cookieName,{path:'/',secure:production,sameSite:'lax',httpOnly:true});res.json({ok:true});
