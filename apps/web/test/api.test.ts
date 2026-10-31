@@ -306,3 +306,54 @@ test('M7 statistics follow stored account timezone and exclude undone events',as
   const updated=await (await request('/stats','GET',undefined,user.cookie)).json() as {reviews:unknown[]};
   assert.equal(updated.reviews.length,0);
 });
+
+test('M9 independent server processes share durable auth, changes and reject concurrent reviews',async()=>{
+  const user=await session('m9-shared@example.com');
+  const secondPort=await availablePort(),secondaryBase='http://127.0.0.1:'+secondPort;
+  const second=spawn(process.execPath,['--experimental-strip-types',resolve(import.meta.dirname,'../server/index.ts')],{
+    cwd:resolve(import.meta.dirname,'..'),
+    env:{...process.env,PORT:String(secondPort),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),NODE_ENV:'test',LOG_LEVEL:'silent'},
+    stdio:['ignore','ignore','pipe']
+  });
+  let stderr='';
+  second.stderr?.on('data',(part:Buffer)=>{stderr+=part.toString('utf8');});
+  const remote=async(path:string,method='GET',body?:unknown,cookie?:string)=>fetch(secondaryBase+'/api/v1'+path,{
+    method,headers:{Origin:origin,...(cookie?{Cookie:cookie}:{}),...(body!==undefined?{'content-type':'application/json'}:{})},
+    body:body===undefined?undefined:JSON.stringify(body)
+  });
+  try{
+    let ready=false;
+    for(let i=0;i<100;i++){
+      if(second.exitCode!==null)throw new Error('Second process failed: '+stderr);
+      try{const result=await remote('/health');if(result.ok){ready=true;break;}}catch{}
+      await new Promise(done=>setTimeout(done,50));
+    }
+    assert.ok(ready,'Second process did not become ready: '+stderr);
+    assert.equal((await remote('/session','GET',undefined,user.cookie)).status,200,
+      'Session must survive across independent Express processes');
+    const deck=(await (await request('/decks','POST',{name:'M9 Multiprocess'},user.cookie)).json() as {deck:{id:string}}).deck;
+    const reflected=await (await remote('/decks','GET',undefined,user.cookie)).json() as {decks:{id:string}[]};
+    assert.ok(reflected.decks.some(d=>d.id===deck.id));
+    await request('/notes','POST',{deckId:deck.id,type:'basic',front:'M9 Q',back:'M9 A',tags:''},user.cookie);
+    const studyId=(await (await request('/study','POST',{deckId:deck.id},user.cookie)).json() as {id:string}).id;
+    const current=await (await request('/study/'+studyId,'GET',undefined,user.cookie)).json() as {revision:number};
+    const body1={rating:3,revision:current.revision,operationId:crypto.randomUUID()};
+    const body2={rating:2,revision:current.revision,operationId:crypto.randomUUID()};
+    const [first,secondRating]=await Promise.all([
+      request('/study/'+studyId+'/rate','POST',body1,user.cookie),
+      remote('/study/'+studyId+'/rate','POST',body2,user.cookie)
+    ]);
+    assert.deepEqual([first.status,secondRating.status].sort((a,b)=>a-b),[200,409]);
+    const result=await (await remote('/stats','GET',undefined,user.cookie)).json() as {reviews:unknown[]};
+    assert.equal(result.reviews.length,1,'A concurrent rating cannot double-commit');
+    const changes=await (await remote('/changes?since=0','GET',undefined,user.cookie)).json() as {changes:{kind:string}[]};
+    assert.ok(changes.changes.some(c=>c.kind==='reviewed'));
+  }finally{
+    if(second.exitCode===null){
+      await new Promise<void>(resolveDone=>{
+        second.once('exit',()=>resolveDone());
+        second.kill('SIGTERM');
+      });
+    }
+  }
+});
