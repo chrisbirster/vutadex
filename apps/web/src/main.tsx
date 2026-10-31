@@ -310,7 +310,7 @@ function CardEditorPage(){const {deckId}=routeCardNew.useSearch();const {data,lo
 
   useEffect(()=>{if(deckId)setForm(s=>{s.deckId=deckId;});},[deckId,setForm]);
   async function save(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{const result=await api<{generatedCards:number}>('/notes',{method:'POST',body:form});setMessage('Saved! '+result.generatedCards+' card(s) ready to study.');setForm(s=>{s.front='';s.back='';s.fields=fieldsForEditor(s.type,'','');s.tags='';});const cleared={...form,front:'',back:'',fields:fieldsForEditor(form.type,'',''),tags:''};lastSaved.current=JSON.stringify(cleared);if(draftRevision>0){void api('/drafts/new',{method:'DELETE',body:{revision:draftRevision}}).then(()=>{setDraftRevision(0);setDraftStatus('Card saved. Draft cleared.');}).catch(()=>{setDraftConflict(true);setDraftStatus('Card saved, but the draft changed elsewhere. Reload before editing again.');});}}catch(e){setError(String(e));}finally{setBusy(false);}}
-  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<select required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t==='cloze'?'Cloze':t==='reverse'?'Reverse':'Basic'}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':'Front → Back'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&draftCompare&&<section className="card conflict" role="alert" aria-label="Concurrent draft edit">
+  return <><Heading title="Add a New Card" subtitle="Feed the knowledge goblin. Weaponize your neurons." mood="hype"/><div className="editor-grid"><form className="card editor" onSubmit={e=>void save(e)}><h3><span className="step">1</span> Choose a Deck</h3>{loading?<p>Loading decks...</p>:<><label htmlFor="target-deck">Deck</label><select id="target-deck" required value={form.deckId} onChange={e=>setForm(s=>{s.deckId=e.target.value;})}><option value="">Select a deck</option>{data?.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></>}<Link to="/decks/new" className="text-link">Create a new deck <Plus size={14}/></Link><h3><span className="step step-blue">2</span> Card Type</h3><div className="type-grid">{NOTE_KINDS.map(t=><button type="button" className={'type-button '+(form.type===t?'selected':'')} key={t} aria-pressed={form.type===t} onClick={()=>setForm(s=>{s.type=t;s.fields=fieldsForEditor(t,s.front,s.back);})}><Layers3 size={19}/><strong>{t.replaceAll('-',' ')}</strong><small>{t==='cloze'?'Fill in the blank':t==='reverse'?'Both ways':t==='basic'?'Front → Back':'Choose format'}</small></button>)}</div><h3><span className="step step-amber">3</span> Card Content</h3><CardFields type={form.type} fields={form.fields} onChange={values=>setForm(d=>{d.fields=values;d.front=values[0]||'';d.back=values[1]||'';})}/><label>Tags (optional)<input value={form.tags} maxLength={300} onChange={e=>setForm(s=>{s.tags=e.target.value;})} placeholder="philosophy, basics, things Bongo knows"/></label><p className="muted" role="status">{draftStatus}</p>{draftConflict&&draftCompare&&<section className="card conflict" role="alert" aria-label="Concurrent draft edit">
   <h3>Draft conflict</h3><p>Your edits are still available locally. Another device saved a different draft.</p>
   <DifferenceTable local={draftCompare.local} server={draftCompare.server||{...draftCompare.local,front:'',back:'',fields:['',''],tags:''}}/>
   {(['type','fields','tags'] as const).map(key=><label key={key} className="checkbox-line"><input type="checkbox" checked={draftCompare.chosen.includes(key)} onChange={e=>setDraftCompare(c=>c?{...c,chosen:e.target.checked?[...c.chosen,key]:c.chosen.filter(x=>x!==key)}:null)}/> Keep my {key}</label>)}
@@ -340,10 +340,12 @@ function EditNotePage(){
   const [initialized,setInitialized]=useState(false);
   const [message,setMessage]=useState(''),[failure,setFailure]=useState(''),[busy,setBusy]=useState(false);
   const base=useRef<EditableNote|null>(null),loadedRevision=useRef<number|null>(null);
+  const lastDeckId=useRef('');
   const formRef=useRef(form);formRef.current=form;
   const [conflict,setConflict]=useState<{server:RemoteNote;local:EditableNote;chosen:(keyof EditableNote)[]}|null>(null);
   useEffect(()=>{
     if(!data?.note)return;
+    lastDeckId.current=data.note.deckId;
     if(loadedRevision.current===null){
       setForm({...toEditable(data.note),revision:data.note.revision});
       base.current=toEditable(data.note);loadedRevision.current=data.note.revision;setInitialized(true);
@@ -390,8 +392,8 @@ function EditNotePage(){
       else setFailure(String(e));
     }finally{setBusy(false);}
   }
-  if(loading&&!initialized)return <Loading/>;
   if(error&&!initialized)return <Notice text={error}/>;
+  if(!initialized)return <Loading/>;
   return <><Heading title="Edit Note" subtitle="Fine-tune your knowledge without losing your brain gains."/>
     <form className="card form-card" onSubmit={e=>void save(e)}>
       <label>Note type<select value={form.type} onChange={e=>setForm(d=>{d.type=e.target.value;d.fields=fieldsForEditor(e.target.value,d.front,d.back);})}>{NOTE_KINDS.map(kind=><option key={kind} value={kind}>{kind.replaceAll('-',' ')}</option>)}</select></label>
@@ -406,7 +408,7 @@ function EditNotePage(){
           <button type="button" className="primary" disabled={busy} onClick={()=>void applyConflict(true)}>Reapply selected changes</button></div>
       </section>}
       <Notice text={failure}/>{message&&<div className="success" role="status">{message}</div>}
-      <div className="actions"><button className="primary" disabled={busy||!!conflict}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Check for Updates</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:data!.note.deckId}}>Back to Deck</Link></div>
+      <div className="actions"><button className="primary" disabled={busy||!!conflict}>{busy?'Saving...':'Save Changes'}</button><button type="button" className="secondary" onClick={()=>{reload();setFailure('');}}>Check for Updates</button><Link className="button secondary" to="/decks/$deckId" params={{deckId:lastDeckId.current}}>Back to Deck</Link></div>
     </form></>;
 }
 function ImportPage(){
