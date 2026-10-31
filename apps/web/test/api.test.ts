@@ -466,8 +466,8 @@ test('mature retention counts real eligible due reviews and bounded active study
       .run(previous,due,account.user.id);
   }finally{local.close();}
   const id=(await (await request('/study','POST',{deckId},account.cookie)).json() as {id:string}).id;
-  const session=await (await request('/study/'+id,'GET',undefined,account.cookie)).json() as {revision:number};
-  assert.equal((await request('/study/'+id+'/rate','POST',{rating:3,revision:session.revision,operationId:crypto.randomUUID()},account.cookie)).status,200);
+  const reviewSession=await (await request('/study/'+id,'GET',undefined,account.cookie)).json() as {revision:number};
+  assert.equal((await request('/study/'+id+'/rate','POST',{rating:3,revision:reviewSession.revision,operationId:crypto.randomUUID()},account.cookie)).status,200);
   const stats=await (await request('/stats','GET',undefined,account.cookie)).json() as {matureRetention:{eligible:number;recalled:number;observedPercent:number}};
   assert.equal(stats.matureRetention.eligible,1);
   assert.equal(stats.matureRetention.recalled,1);
