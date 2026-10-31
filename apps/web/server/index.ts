@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { db, transaction } from './db.ts';
+import { mailConfig, sendViaSes } from './email.ts';
 import { nextMemoryState, nextIntervalDays, type Rating, type MemoryState } from '../../../fsrs/algorithm.ts';
 import { FSRS_VERSION } from '../../../fsrs/parameters.ts';
 
@@ -39,7 +40,7 @@ function account(req: Request): Account {
 function sendCookie(res: Response, value: string, age: number) {
   res.cookie(cookieName,value,{httpOnly:true,secure:production,sameSite:'lax',path:'/',maxAge:age});
 }
-function handler(fn: (req:Request,res:Response)=>void) { return (req:Request,res:Response,next:NextFunction) => { try { fn(req,res); } catch(e){next(e);} }; }
+function handler(fn: (req:Request,res:Response)=>unknown) { return (req:Request,res:Response,next:NextFunction) => { try { Promise.resolve(fn(req,res)).catch(next); } catch(e){next(e);} }; }
 app.disable('x-powered-by');
 app.use((req,res,next)=>{
   const requestId=randomUUID(); res.setHeader('x-request-id', requestId);
@@ -55,25 +56,50 @@ app.use((req,res,next)=>{
 });
 app.get('/api/v1/health',(_req,res)=>res.json({status:'ok'}));
 const inbox: {email:string;link:string}[]=[];
-const attempts = new Map<string, {count:number;until:number}>();
-app.post('/api/v1/auth/magic-links',handler((req,res)=>{
-  const email=required(req.body?.email,'email',254).toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400,'Enter a valid email');
-  const key=hash(email); const count=attempts.get(key);
-  if (count && count.until>now() && count.count>=5) { res.json({ok:true}); return; }
-  attempts.set(key,{count:count && count.until>now()?count.count+1:1,until:now()+3600000});
-  if (production) throw new ApiError(503,'Email delivery is not configured for production');
-  const secret=token();
-  run('INSERT INTO challenges(token_hash,email,expires_at) VALUES(?,?,?)',hash(secret),email,now()+15*60000);
+
+function throttle(key:string,max:number,periodMs:number):boolean {
+  const time=now();
+  return transaction(()=>{
+    const row=query<{count:number;reset_at:number}>('SELECT count,reset_at FROM auth_attempts WHERE key=?',key);
+    if(!row||row.reset_at<=time){
+      run('INSERT INTO auth_attempts(key,count,reset_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET count=excluded.count,reset_at=excluded.reset_at',key,1,time+periodMs);
+      return true;
+    }
+    if(row.count>=max)return false;
+    run('UPDATE auth_attempts SET count=count+1 WHERE key=?',key);
+    return true;
+  });
+}
+function canonicalEmail(value:unknown):string{
+  const email=required(value,'email',254),at=email.lastIndexOf('@');
+  if(at<1||at===email.length-1)throw new ApiError(400,'Enter a valid email');
+  // Email local parts retain case, dots and plus-tags; only DNS domains are case-folded.
+  const local=email.slice(0,at),domain=email.slice(at+1).toLowerCase();
+  if(!/^[^\s@]+$/.test(local)||!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain))throw new ApiError(400,'Enter a valid email');
+  return local+'@'+domain;
+}
+app.post('/api/v1/auth/magic-links',handler(async(req,res)=>{
+  const email=canonicalEmail(req.body?.email);
+  const ip=req.socket.remoteAddress||'unknown';
+  const ipAllowed=throttle('ip:'+hash(ip),30,3600000);
+  const emailAllowed=throttle('email:'+hash(email),5,3600000);
+  const cooldown=throttle('cooldown:'+hash(email),1,process.env.NODE_ENV==='test'?0:60000);
+  if(!ipAllowed||!emailAllowed||!cooldown){res.json({ok:true});return;}
+  const secret=token(),digest=hash(secret);
+  run('INSERT INTO challenges(token_hash,email,expires_at) VALUES(?,?,?)',digest,email,now()+15*60000);
   const link=origin+'/auth/verify#token='+encodeURIComponent(secret);
-  inbox.push({email,link});
-  if(inbox.length>25) inbox.shift();
-  // The local inbox, rather than logs or public API responses, owns redeemable tokens.
+  try{
+    if(production)await sendViaSes(mailConfig(process.env),email,link);
+    else{inbox.push({email,link});if(inbox.length>25)inbox.shift();}
+  }catch{
+    run('DELETE FROM challenges WHERE token_hash=?',digest);
+    throw new ApiError(503,'Email delivery unavailable');
+  }
   res.json({ok:true});
 }));
 // Local-only development inbox; never registered in production.
 if(!production) app.get('/api/v1/dev/inbox',(_req,res)=>{
-  if (!['127.0.0.1','localhost'].includes(_req.hostname)) { res.sendStatus(403); return; }
+  if (!['127.0.0.1','localhost'].includes(_req.hostname) || !['127.0.0.1','::1','::ffff:127.0.0.1'].includes(_req.socket.remoteAddress||'')) { res.sendStatus(403); return; }
   res.json(inbox);
 });
 app.post('/api/v1/auth/magic-links/consume',handler((req,res)=>{
@@ -97,6 +123,14 @@ app.post('/api/v1/logout',handler((req,res)=>{
 }));
 app.get('/api/v1/sessions',handler((req,res)=>{
   const user=account(req);res.json({sessions:list('SELECT substr(token_hash,1,12) AS id,created_at,last_seen,expires_at FROM sessions WHERE user_id=? ORDER BY last_seen DESC',user.id)});
+}));
+app.post('/api/v1/sessions/revoke',handler((req,res)=>{
+  const user=account(req),id=required(req.body?.id,'session ID',12);
+  if(!/^[0-9a-f]{12}$/.test(id))throw new ApiError(400,'Invalid session ID');
+  const matched=list<{token_hash:string}>('SELECT token_hash FROM sessions WHERE user_id=? AND substr(token_hash,1,12)=?',user.id,id);
+  if(matched.length!==1)throw new ApiError(404,'Session not found');
+  run('DELETE FROM sessions WHERE user_id=? AND token_hash=?',user.id,matched[0]!.token_hash);
+  res.json({ok:true});
 }));
 app.post('/api/v1/sessions/revoke-all',handler((req,res)=>{
   const user=account(req);run('DELETE FROM sessions WHERE user_id=?',user.id);
