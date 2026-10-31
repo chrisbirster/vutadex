@@ -32,7 +32,7 @@ h1,h2,h3{line-height:1.16;margin:0 0 12px;font-weight:850;letter-spacing:-.025em
 :focus-visible{outline:3px solid #145c77!important;outline-offset:3px}
 @media(hover:none){.nav-link,.button,button.primary,button.secondary,.type-button{min-height:44px}}
 
-.occlusion-image{display:inline-block;position:relative;line-height:0;max-width:min(100%,580px);overflow:hidden;border:2px solid #aecac4;border-radius:12px}
+.occlusion-image{display:inline-block;position:relative;line-height:0;width:min(100%,560px);max-width:100%;overflow:hidden;border:2px solid #aecac4;border-radius:12px}
 .occlusion-image img{display:block;width:100%;height:auto}
 .occlusion-cover{position:absolute;display:block;background:#203f4c;border:2px solid #fff;border-radius:3px;opacity:.94}
 .occlusion-cover.other{background:#48606a}
