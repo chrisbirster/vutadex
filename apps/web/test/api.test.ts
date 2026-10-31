@@ -357,3 +357,29 @@ test('M9 independent server processes share durable auth, changes and reject con
     }
   }
 });
+
+test('M4 advanced notes persist CLI-compatible field arrays and retain stable generated card IDs',async()=>{
+  const user=await session('advanced-notes@example.com');
+  const deck=(await (await request('/decks','POST',{name:'Advanced Cards'},user.cookie)).json() as {deck:{id:string}}).deck.id;
+  const choices=JSON.stringify([{id:'a',text:'Paris'},{id:'b',text:'London'}]);
+  const body={deckId:deck,type:'multiple-choice',fields:['Capital of France?',choices,'a','Explanation'],tags:'geography'};
+  const created=await request('/notes','POST',body,user.cookie);
+  assert.equal(created.status,201);
+  const note=(await created.json() as {note:{id:string};generatedCards:number});
+  assert.equal(note.generatedCards,1);
+  const fetched=await (await request('/notes/'+note.note.id,'GET',undefined,user.cookie)).json() as {note:{fields:string[]}};
+  assert.deepEqual(fetched.note.fields,body.fields);
+  const imported=await request('/decks/'+deck+'/export','GET',undefined,user.cookie);
+  assert.equal(imported.status,200);
+  assert.match(await imported.text(),/"note_type":"multiple-choice"/);
+  const edit=await request('/notes/'+note.note.id,'PUT',{...body,revision:0,fields:['Capital of Italy?',choices,'b','']},user.cookie);
+  assert.equal(edit.status,200);
+  assert.equal((await request('/notes/'+note.note.id,'GET',undefined,user.cookie).then(r=>r.json()) as {note:{revision:number}}).note.revision,1);
+  const malformed=await request('/notes','POST',{deckId:deck,type:'multiple-select',fields:['Prompt',choices,'["unknown"]',''],tags:''},user.cookie);
+  assert.equal(malformed.status,400);
+  const preview=await request('/import/preview','POST',{format:'deck',content:[
+    JSON.stringify({kind:'deck',format:'plandalf.deck',version:2,name:'Advanced Import'}),
+    JSON.stringify({kind:'note',note_type:'ordering',fields:['Order',choices,''],tags_json:'[]'})
+  ].join('\n')},user.cookie);
+  assert.equal(preview.status,200);
+});

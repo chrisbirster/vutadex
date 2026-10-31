@@ -168,8 +168,10 @@ function draftInput(value:unknown):{deckId:string;type:string;front:string;back:
     if(typeof x!=='string'||x.length>max||x.includes('\0'))throw new ApiError(400,'Invalid draft '+key);
     result[key]=x;
   }
-  if(result.type && !['basic','reverse','cloze'].includes(result.type))throw new ApiError(400,'Unsupported draft type');
-  return result as {deckId:string;type:string;front:string;back:string;tags:string};
+  if(result.type && !['basic','reverse','optional-reverse','cloze','type-answer','multiple-choice','multiple-select','ordering'].includes(result.type))throw new ApiError(400,'Unsupported draft type');
+  const fields=(body.fields===undefined?[result.front,result.back]:body.fields);
+  if(!Array.isArray(fields)||fields.length>4||fields.some(v=>typeof v!=='string'||v.length>6000||v.includes('\\0')))throw new ApiError(400,'Invalid draft fields');
+  return {...result,fields} as {deckId:string;type:string;front:string;back:string;tags:string;fields:string[]};
 }
 app.get('/api/v1/drafts/:key',handler((req,res)=>{
   const user=account(req),key=draftKey(req.params.key);
