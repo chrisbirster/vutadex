@@ -4,6 +4,7 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvide
 import { useImmer } from 'use-immer';
 import { Home, Layers3, Play, SquarePlus, ChartNoAxesColumnIncreasing, Settings, Search, LogOut, Sparkles, Flame, BookOpen, Plus, ArrowRight, Eye, RotateCcw, Check, Clock, Target, ChevronLeft, ChevronRight, Keyboard, Mail, LoaderCircle, Brain, Menu, X, Download, PanelLeft, CircleHelp } from 'lucide-react';
 import {mergeEdits,applySelections,type EditableNote} from './merge.ts';
+import {compareTypedAnswer} from './typed-answer.ts';
 import './style.css';
 
 type User = {id:string;email:string};
@@ -11,7 +12,9 @@ type Deck = {id:string;name:string;description:string;created_at?:number;cards?:
 type Note = {id:string;type:string;front:string;back:string;tags:string;created_at:number;revision:number};
 type Review = {rating:number;created_at:number;deck:string;day?:string};
 type Overview = {decks:Deck[];due:number;cards:number;timezone:string;reviews:Review[]};
-type Study = {card:{id:string;front:string;back:string;due_at:number}|null;position:number;total:number;revision:number;waiting:number;paused:boolean;intervals:{rating:number;intervalMs:number;dueAt:number}[]};
+type MaskRect={id:number;x:number;y:number;width:number;height:number};
+type StudyPresentation={kind:'text'}|{kind:'type-answer'}|{kind:'image-occlusion';imageHash:string;prompt:string;mask:MaskRect;otherMasks:MaskRect[]};
+type Study = {card:{id:string;front:string;back:string;due_at:number;presentation:StudyPresentation}|null;position:number;total:number;revision:number;waiting:number;paused:boolean;intervals:{rating:number;intervalMs:number;dueAt:number}[]};
 type SessionState = {user:User|null;loading:boolean;error:string};
 type SessionContextValue={session:SessionState;refresh:()=>Promise<void>};
 const SessionContext=createContext<SessionContextValue|null>(null);
@@ -473,7 +476,24 @@ function humanInterval(ms:number):string{
   if(ms<86400000)return Math.max(1,Math.round(ms/3600000))+'h';
   return Math.max(1,Math.round(ms/86400000))+'d';
 }
-function StudySessionPage(){const {sessionId}=routeStudySession.useParams();const {data,loading,error,reload}=useResource<Study>('/study/'+encodeURIComponent(sessionId));const [revealed,setRevealed]=useState(false);const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');const [canUndo,setCanUndo]=useState(false);const rate=async(rating:number)=>{if(!data?.card||!revealed||busy)return;setBusy(true);setMessage('');try{await api('/study/'+encodeURIComponent(sessionId)+'/rate',{method:'POST',body:{rating,revision:data.revision,operationId:crypto.randomUUID()}});setRevealed(false);setCanUndo(true);reload();}catch(e){setMessage(String(e));reload();}finally{setBusy(false);}};
+
+function OcclusionQuestion({view,revealed}:{view:Extract<StudyPresentation,{kind:'image-occlusion'}>;revealed:boolean}){
+  const rect=(mask:MaskRect):React.CSSProperties=>({
+    left:(mask.x*100)+'%',top:(mask.y*100)+'%',width:(mask.width*100)+'%',height:(mask.height*100)+'%'
+  });
+  return <div>
+    <h2>{view.prompt}</h2>
+    <div className="occlusion-image" role="group" aria-label="Image with hidden study region">
+      <img src={'/api/v1/media/'+view.imageHash} alt="Study image with occluded regions"/>
+      {view.otherMasks.map(mask=><span key={mask.id} className="occlusion-cover other" style={rect(mask)} aria-hidden="true"/>)}
+      <span className={'occlusion-cover target'+(revealed?' revealed':'')} style={rect(view.mask)}
+        role="img" aria-label={revealed?'Revealed target region':'Masked region to identify'}/>
+    </div>
+    <p className="muted">{revealed?'Target region outlined. Compare the answer below.':'Identify the covered region, then reveal the answer.'}</p>
+  </div>;
+}
+
+function StudySessionPage(){const {sessionId}=routeStudySession.useParams();const {data,loading,error,reload}=useResource<Study>('/study/'+encodeURIComponent(sessionId));const [revealed,setRevealed]=useState(false);const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');const [canUndo,setCanUndo]=useState(false);const [typed,setTyped]=useState('');const rate=async(rating:number)=>{if(!data?.card||!revealed||busy)return;setBusy(true);setMessage('');try{await api('/study/'+encodeURIComponent(sessionId)+'/rate',{method:'POST',body:{rating,revision:data.revision,operationId:crypto.randomUUID()}});setRevealed(false);setTyped('');setCanUndo(true);reload();}catch(e){setMessage(String(e));reload();}finally{setBusy(false);}};
   useEffect(()=>{const handle=(e:KeyboardEvent)=>{if(['INPUT','TEXTAREA','SELECT'].includes((e.target as HTMLElement)?.tagName))return;if(e.code==='Space'&&!revealed){e.preventDefault();setRevealed(true);}if(revealed&&['1','2','3','4'].includes(e.key)){e.preventDefault();void rate(Number(e.key));}};window.addEventListener('keydown',handle);return()=>window.removeEventListener('keydown',handle);},[revealed,busy,data,sessionId]);
 
   const lastInteraction=useRef(Date.now());
@@ -491,14 +511,31 @@ function StudySessionPage(){const {sessionId}=routeStudySession.useParams();cons
   async function updateSession(action:'pause'|'resume'|'undo'){
     if(!data)return;setBusy(true);setMessage('');
     try{await api('/study/'+encodeURIComponent(sessionId)+'/'+action,{method:'POST',body:{revision:data.revision}});
-      if(action==='undo'){setCanUndo(false);setRevealed(false);}reload();
+      if(action==='undo'){setCanUndo(false);setRevealed(false);setTyped('');}reload();
     }catch(e){setMessage(String(e));reload();}finally{setBusy(false);}
   }
   if(loading)return <Loading/>;if(error)return <Notice text={error}/>;if(!data?.card)return <><Heading title="Brain gains secured!" subtitle="You cleared the queue. Bongo is proud of you." mood="hype"/><Empty title="All done for now" message="Come back when more cards are due." action={<Link className="button primary" to="/">Back to home</Link>}/></>;
   return <><Heading title="Study Session" subtitle="A slightly smarter you, one card at a time." mood="thinking"/><div className="study-controls actions">
       <button className="secondary" disabled={busy} onClick={()=>void updateSession(data.paused?'resume':'pause')}>{data.paused?'Resume Session':'Pause Session'}</button>
       {canUndo&&<button className="secondary" disabled={busy} onClick={()=>void updateSession('undo')}><RotateCcw size={17}/> Undo Last Rating</button>}
-    </div><div className="study-layout"><div><div className="progress-label">Card {data.position+1} of {data.total}<span>{Math.round(data.position/Math.max(1,data.total)*100)}%</span></div><div className="progress"><div style={{width:String(data.position/Math.max(1,data.total)*100)+'%'}}/></div><div className="study-card card"><small className="pill">Question</small><h2>{data.card.front}</h2>{revealed&&<div className="answer"><span className="eyebrow">THE REVEAL</span><p>{data.card.back}</p></div>}</div>{data.paused?<div className="waiting"><Clock/> Session paused. Resume to continue.</div>:data.waiting>0?<div className="waiting"><Clock/> This card returns in about {Math.ceil(data.waiting/1000)} seconds. <button className="secondary" onClick={reload}>Check again</button></div>:!revealed?<button className="primary reveal" onClick={()=>setRevealed(true)}><Eye/> Show Answer <kbd>Space</kbd></button>:<div className="rating-grid">{([{name:'Again',key:1,subtitle:'Forgot it',tone:'peach'},{name:'Hard',key:2,subtitle:'Still fuzzy',tone:'cream'},{name:'Good',key:3,subtitle:'Mostly got it',tone:'mint'},{name:'Easy',key:4,subtitle:'Knew it well',tone:'blue'}] as const).map(r=><button disabled={busy} key={r.key} className={'rating rating-'+r.tone} onClick={()=>void rate(r.key)}><Bongo mood={r.key===1?'sleepy':r.key===2?'thinking':r.key===4?'hype':'happy'}/><strong>{r.name}</strong><kbd>{r.key}</kbd><small>{r.subtitle} · {data.intervals.find(x=>x.rating===r.key)?humanInterval(data.intervals.find(x=>x.rating===r.key)!.intervalMs):'—'}</small></button>)}</div>}<Notice text={message}/></div><aside className="study-aside"><div className="card"><h3>Session Progress</h3><Tile icon={Layers3} value={data.total-data.position} label="Remaining" tone="mint"/><Tile icon={Check} value={data.position} label="Reviewed" tone="cream"/></div><div className="mascot-note"><Bongo mood="happy"/><p>FOCUS MODE: BONGO BELIEVES IN YOU.</p></div></aside></div></>;
+    </div><div className="study-layout"><div><div className="progress-label">Card {data.position+1} of {data.total}<span>{Math.round(data.position/Math.max(1,data.total)*100)}%</span></div><div className="progress"><div style={{width:String(data.position/Math.max(1,data.total)*100)+'%'}}/></div><div className="study-card card"><small className="pill">Question</small>{data.card.presentation.kind==='image-occlusion'
+        ?<OcclusionQuestion view={data.card.presentation} revealed={revealed}/>
+        :<h2>{data.card.front}</h2>}
+      {data.card.presentation.kind==='type-answer'&&<label className="typed-input">Type your answer
+        <input value={typed} disabled={revealed||busy} placeholder="Your answer (self-assessment)"
+          onChange={e=>setTyped(e.target.value)}
+          onKeyDown={e=>{if(e.key==='Enter'&&!revealed){e.preventDefault();setRevealed(true);}}}/>
+      </label>}
+      {revealed&&<div className="answer"><span className="eyebrow">THE REVEAL</span>
+        <p>{data.card.back}</p>
+        {data.card.presentation.kind==='type-answer'&&<p role="status" className="muted">{
+          compareTypedAnswer(typed,data.card.back)==='match'
+            ?'Your typed answer matches after whitespace and case normalization.'
+            :compareTypedAnswer(typed,data.card.back)==='empty'
+              ?'No typed answer entered. Rate how well you recalled it.'
+              :'Your typed answer differs. Compare it above and choose your own recall rating.'
+        }</p>}
+      </div>}</div>{data.paused?<div className="waiting"><Clock/> Session paused. Resume to continue.</div>:data.waiting>0?<div className="waiting"><Clock/> This card returns in about {Math.ceil(data.waiting/1000)} seconds. <button className="secondary" onClick={reload}>Check again</button></div>:!revealed?<button className="primary reveal" onClick={()=>setRevealed(true)}><Eye/> Show Answer <kbd>Space</kbd></button>:<div className="rating-grid">{([{name:'Again',key:1,subtitle:'Forgot it',tone:'peach'},{name:'Hard',key:2,subtitle:'Still fuzzy',tone:'cream'},{name:'Good',key:3,subtitle:'Mostly got it',tone:'mint'},{name:'Easy',key:4,subtitle:'Knew it well',tone:'blue'}] as const).map(r=><button disabled={busy} key={r.key} className={'rating rating-'+r.tone} onClick={()=>void rate(r.key)}><Bongo mood={r.key===1?'sleepy':r.key===2?'thinking':r.key===4?'hype':'happy'}/><strong>{r.name}</strong><kbd>{r.key}</kbd><small>{r.subtitle} · {data.intervals.find(x=>x.rating===r.key)?humanInterval(data.intervals.find(x=>x.rating===r.key)!.intervalMs):'—'}</small></button>)}</div>}<Notice text={message}/></div><aside className="study-aside"><div className="card"><h3>Session Progress</h3><Tile icon={Layers3} value={data.total-data.position} label="Remaining" tone="mint"/><Tile icon={Check} value={data.position} label="Reviewed" tone="cream"/></div><div className="mascot-note"><Bongo mood="happy"/><p>FOCUS MODE: BONGO BELIEVES IN YOU.</p></div></aside></div></>;
 }
 
 function accountDate(instant:number,timezone:string):string{
