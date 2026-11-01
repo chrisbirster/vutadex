@@ -26,7 +26,7 @@ async function availablePort():Promise<number> {
 async function start(): Promise<void> {
   const port=await availablePort();base='http://127.0.0.1:'+port;
   server=spawn(process.execPath,['--experimental-strip-types',resolve(import.meta.dirname,'../server/index.ts')],{
-    cwd:resolve(import.meta.dirname,'..'),env:{...process.env,PORT:String(port),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),NODE_ENV:'test',LOG_LEVEL:'silent'},stdio:['ignore','ignore','pipe']
+    cwd:resolve(import.meta.dirname,'..'),env:{...process.env,FLY_APP_NAME:undefined,PORT:String(port),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),NODE_ENV:'test',LOG_LEVEL:'silent'},stdio:['ignore','ignore','pipe']
   });
   server.stderr?.on('data',(part:Buffer)=>{serverStderr += part.toString('utf8');});
   let error:unknown;
@@ -542,22 +542,72 @@ test('study serves owned typed-answer and occlusion presentations with stable re
 });
 
 
-test('Fly client IP header is used for separate IP throttle buckets without proxy trust',async()=>{
-  const addresses=['198.51.100.101','198.51.100.102'];
-  for(const [n,address] of addresses.entries()){
-    const response=await fetch(base+'/api/v1/auth/magic-links',{
-      method:'POST',
-      headers:{Origin:origin,'Content-Type':'application/json','Fly-Client-IP':address},
-      body:JSON.stringify({email:'fly-client-ip-'+n+'@example.com'})
-    });
-    assert.equal(response.status,200);
-  }
+test('Fly client IP header gets separate throttle buckets when FLY_APP_NAME is set',async()=>{
+  // The app under test for the main suite deliberately has no FLY_APP_NAME.
+  // Spawn a separate local process to exercise the Fly-only branch explicitly.
+  const port=await availablePort();
+  const flyBase='http://127.0.0.1:'+port;
+  const flyDatabase=join(root,'fly-throttle.db');
+  let flyStderr='';
+  const flyServer=spawn(process.execPath,['--experimental-strip-types',resolve(import.meta.dirname,'../server/index.ts')],{
+    cwd:resolve(import.meta.dirname,'..'),
+    env:{...process.env,FLY_APP_NAME:'vutadex-web',PORT:String(port),HOST:'127.0.0.1',APP_ORIGIN:origin,
+      VUTADEX_DB:flyDatabase,NODE_ENV:'test',LOG_LEVEL:'silent'},
+    stdio:['ignore','ignore','pipe']
+  });
+  flyServer.stderr?.on('data',(part:Buffer)=>{flyStderr+=part.toString('utf8');});
+  try{
+    let ready=false;
+    for(let attempt=0;attempt<100;attempt++){
+      if(flyServer.exitCode!==null)throw new Error('Fly fixture exited: '+flyStderr);
+      try{
+        const response=await fetch(flyBase+'/api/v1/health');
+        if(response.ok){ready=true;break;}
+      }catch{/* The test process is not listening yet. */}
+      await new Promise(done=>setTimeout(done,50));
+    }
+    assert.ok(ready,'Fly-mode fixture did not start: '+flyStderr);
+    const addresses=['198.51.100.101','198.51.100.102'];
+    for(const [n,address] of addresses.entries()){
+      const response=await fetch(flyBase+'/api/v1/auth/magic-links',{
+        method:'POST',
+        headers:{Origin:origin,'Content-Type':'application/json','Fly-Client-IP':address},
+        body:JSON.stringify({email:'fly-client-ip-'+n+'@example.com'})
+      });
+      assert.equal(response.status,200);
+    }
+    const reader=new DatabaseSync(flyDatabase,{readOnly:true});
+    try{
+      const get=reader.prepare('SELECT count FROM auth_attempts WHERE key=?');
+      for(const address of addresses){
+        const digest=createHash('sha256').update(address).digest('hex');
+        assert.equal((get.get('ip:'+digest) as {count:number}|undefined)?.count,1);
+      }
+    }finally{reader.close();}
+  }finally{flyServer.kill();}
+});
+
+test('forged Fly-Client-IP is ignored when FLY_APP_NAME is unset',async()=>{
+  // The main test process starts with FLY_APP_NAME explicitly absent.
+  // Every forged header must increment the same loopback socket-IP bucket.
+  const addresses=['203.0.113.141','203.0.113.142'];
   const reader=new DatabaseSync(join(root,'test.db'),{readOnly:true});
   try{
     const get=reader.prepare('SELECT count FROM auth_attempts WHERE key=?');
+    const socketKey='ip:'+createHash('sha256').update('127.0.0.1').digest('hex');
+    const before=(get.get(socketKey) as {count:number}|undefined)?.count||0;
+    for(const [n,address] of addresses.entries()){
+      const response=await fetch(base+'/api/v1/auth/magic-links',{
+        method:'POST',
+        headers:{Origin:origin,'Content-Type':'application/json','Fly-Client-IP':address},
+        body:JSON.stringify({email:'non-fly-ip-'+n+'@example.com'})
+      });
+      assert.equal(response.status,200);
+    }
+    assert.equal((get.get(socketKey) as {count:number}|undefined)?.count,before+addresses.length);
     for(const address of addresses){
-      const digest=createHash('sha256').update(address).digest('hex');
-      assert.equal((get.get('ip:'+digest) as {count:number}|undefined)?.count,1);
+      const spoofedKey='ip:'+createHash('sha256').update(address).digest('hex');
+      assert.equal(get.get(spoofedKey),undefined);
     }
   }finally{reader.close();}
 });

@@ -89,8 +89,9 @@ function canonicalEmail(value:unknown):string{
 }
 app.post('/api/v1/auth/magic-links',handler(async(req,res)=>{
   const email=canonicalEmail(req.body?.email);
-  // Fly's ingress provides the client IP; do not globally trust proxy headers.
-  const forwarded = req.get('Fly-Client-IP')?.trim();
+  // Only Fly Machines trust Fly's ingress header; local/direct non-Fly traffic uses the socket.
+  // Fly sets FLY_APP_NAME at runtime. Do not enable global Express trust proxy.
+  const forwarded = process.env.FLY_APP_NAME ? req.get('Fly-Client-IP')?.trim() : undefined;
   const ip = forwarded && isIP(forwarded) ? forwarded : req.socket.remoteAddress || 'unknown';
   const ipAllowed=throttle('ip:'+hash(ip),process.env.NODE_ENV==='test'?1000:30,3600000);
   const emailAllowed=throttle('email:'+hash(email),5,3600000);
