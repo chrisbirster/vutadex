@@ -48,7 +48,7 @@ jobs:
             import { readFileSync } from "node:fs";
             import assert from "node:assert/strict";
             const fly = readFileSync("fly.toml", "utf8");
-            const env = fly.match(/^\[env\]([\s\S]*?)(?=^\[|$)/m)?.[1];
+            const env = fly.split(/^\[env\]\s*$/m)[1]?.split(/^\[/m)[0];
             assert.ok(env, "missing Fly production env");
             const host = env.match(/^\s*HOST\s*=\s*"([^"]+)"/m)?.[1];
             assert.equal(host, "0.0.0.0", "Fly MUST bind IPv4-only, never :: or [::]");
