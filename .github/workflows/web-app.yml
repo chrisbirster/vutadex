@@ -9,6 +9,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/web-app.yml'
+      - '.dockerignore'
+      - 'fly.toml'
 permissions:
   contents: read
 jobs:
@@ -27,3 +29,25 @@ jobs:
       - run: npm run terminal:check
       - run: npm run build
       - run: node --test test/packaged-cli.verify.ts test/package-manifest.verify.ts
+  image-smoke:
+    name: Node 26 Docker image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image locally in CI (never deploy)
+        run: docker build --file apps/web/Dockerfile --tag vutadex-web:ci .
+      - name: Check non-root runner and writable local data path
+        run: docker run --rm --entrypoint sh vutadex-web:ci -c 'test "$(id -u)" -ne 0 && test -w /data'
+      - name: Smoke test Express on 0.0.0.0:3001
+        run: |
+          cid=$(docker run --detach --rm -e HOST=0.0.0.0 -e PORT=3001 -e VUTADEX_DB=/data/vutadex-web.db -p 127.0.0.1:3001:3001 vutadex-web:ci)
+          trap 'docker stop "$cid" >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3001/api/v1/health | grep -q '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$cid"
+          exit 1
