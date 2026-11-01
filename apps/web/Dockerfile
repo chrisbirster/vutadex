@@ -15,6 +15,8 @@ RUN npm prune --omit=dev
 FROM node:26-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# runuser is explicit, not assumed to exist in the slim base image.
+RUN apt-get update && apt-get install -y --no-install-recommends util-linux && rm -rf /var/lib/apt/lists/*
 
 # Runtime TS imports shared scheduler and note types from the monorepo root.
 COPY --from=build --chown=node:node /app/package.json ./package.json
@@ -27,8 +29,9 @@ COPY --from=build --chown=node:node /app/services ./services
 COPY --from=build --chown=node:node /app/models ./models
 COPY --from=build --chown=node:node /app/constants.ts ./constants.ts
 
-# Fly's volume is mounted at /data; verify its effective ownership in staging.
+# The image-layer directory is not the Fly volume: its ownership is fixed at startup.
 RUN mkdir -p /data && chown node:node /data
-USER node
+COPY --chmod=755 apps/web/docker-entrypoint.sh /usr/local/bin/vutadex-entrypoint
 EXPOSE 3001
+ENTRYPOINT ["/usr/local/bin/vutadex-entrypoint"]
 CMD ["node", "--experimental-strip-types", "apps/web/server/index.ts"]

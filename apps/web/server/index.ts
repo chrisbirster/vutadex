@@ -89,8 +89,13 @@ function canonicalEmail(value:unknown):string{
 }
 app.post('/api/v1/auth/magic-links',handler(async(req,res)=>{
   const email=canonicalEmail(req.body?.email);
-  // Only Fly Machines trust Fly's ingress header; local/direct non-Fly traffic uses the socket.
-  // Fly sets FLY_APP_NAME at runtime. Do not enable global Express trust proxy.
+  // Fly Proxy overwrites Fly-Client-IP on public ingress (unspoofable there).
+  // Trust it only on Fly (FLY_APP_NAME), with HOST=0.0.0.0 IPv4-only in production:
+  // Fly private Machine-to-Machine networking uses IPv6, so never bind :: or [::].
+  // Fly org members with private-network/flyctl access are trusted operators.
+  // https://community.fly.io/t/security-guidance-verifying-fly-proxy-socket-peers-and-forwarded-headers/28891
+  // https://fly.io/docs/networking/request-headers/
+  // Do not enable global Express trust proxy.
   const forwarded = process.env.FLY_APP_NAME ? req.get('Fly-Client-IP')?.trim() : undefined;
   const ip = forwarded && isIP(forwarded) ? forwarded : req.socket.remoteAddress || 'unknown';
   const ipAllowed=throttle('ip:'+hash(ip),process.env.NODE_ENV==='test'?1000:30,3600000);
