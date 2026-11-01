@@ -5,6 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 
 const root = mkdtempSync(join(tmpdir(), 'vutadex-web-api-'));
 const origin = 'http://127.0.0.1:5173';
@@ -537,4 +539,25 @@ test('study serves owned typed-answer and occlusion presentations with stable re
   const second=await (await request('/study/'+secondId,'GET',undefined,user.cookie)).json() as {card:{presentation:{kind:string};back:string}};
   assert.equal(second.card.presentation.kind,'type-answer');
   assert.equal(second.card.back,'Paris');
+});
+
+
+test('Fly client IP header is used for separate IP throttle buckets without proxy trust',async()=>{
+  const addresses=['198.51.100.101','198.51.100.102'];
+  for(const [n,address] of addresses.entries()){
+    const response=await fetch(base+'/api/v1/auth/magic-links',{
+      method:'POST',
+      headers:{Origin:origin,'Content-Type':'application/json','Fly-Client-IP':address},
+      body:JSON.stringify({email:'fly-client-ip-'+n+'@example.com'})
+    });
+    assert.equal(response.status,200);
+  }
+  const reader=new DatabaseSync(join(root,'test.db'),{readOnly:true});
+  try{
+    const get=reader.prepare('SELECT count FROM auth_attempts WHERE key=?');
+    for(const address of addresses){
+      const digest=createHash('sha256').update(address).digest('hex');
+      assert.equal((get.get('ip:'+digest) as {count:number}|undefined)?.count,1);
+    }
+  }finally{reader.close();}
 });
