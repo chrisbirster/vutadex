@@ -21,6 +21,12 @@ const SessionContext=createContext<SessionContextValue|null>(null);
 function broadcastSessionChange(){if(typeof BroadcastChannel!=='undefined'){const c=new BroadcastChannel('vutadex:session');c.postMessage('session-changed');c.close();}}
 
 const AccountChangeContext=createContext(0);
+// Bound each catch-up page request: an unbounded fetch can hang indefinitely and
+// leave the sync loop silently wedged (neither connected nor failing). On timeout
+// the request rejects, connected flips false, the SSE fallback still opens, and the
+// next user-driven focus/visibility event starts a fresh catch-up (no auto-retry).
+// AbortSignal.timeout is supported by every targeted browser (Chrome 103+, Firefox 100+, Safari 16+).
+const SYNC_REQUEST_TIMEOUT_MS=15000;
 function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>Promise<void>;children:React.ReactNode}){
   const [state,setState]=useImmer({cursor:0,revision:0,connected:false});
   useEffect(()=>{
@@ -31,7 +37,7 @@ function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>
       try{
         let more=true;
         while(!closed&&more){
-          const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq);
+          const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq,{signal:AbortSignal.timeout(SYNC_REQUEST_TIMEOUT_MS)});
           if(response.changes.length)setState(d=>{d.revision++;});
           seq=Math.max(seq,response.cursor);more=response.hasMore;
         }

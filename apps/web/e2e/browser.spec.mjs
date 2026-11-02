@@ -42,7 +42,11 @@ test('two browsers: shared decks, draft editing and conflicting note writes are 
     await signIn(pa,email);await signIn(pb,email);
     const name='Sync '+Date.now();
     await pb.goto('/decks');
+    // Synchronize on the actual sync signal (SSE-triggered /decks refetch) before
+    // the UI assertion, so the test measures sync correctness, not machine speed.
+    const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(name),{timeout:12000});
     await createDeck(pa,name);
+    await deckRefreshed;
     await expect(pb.getByRole('heading',{name})).toBeVisible({timeout:12000});
     await pa.getByRole('link',{name:'Add Cards'}).last().click();
     await pa.getByLabel('Front').fill('What is a race condition?');
@@ -125,7 +129,13 @@ test('reconnecting a temporarily offline device catches up without a second acco
     await createDeck(pa,title);
     await b.setOffline(false);
     await pb.bringToFront();
+    // Register sync-signal waits before the focus event so the catch-up response
+    // and the resulting /decks refetch cannot race past the listeners. The heading
+    // assertion below still proves the UI actually renders the synced deck.
+    const caughtUp=pb.waitForResponse(r=>r.url().includes('/api/v1/changes?')&&r.ok(),{timeout:15000});
+    const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(title),{timeout:15000});
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await caughtUp;await deckRefreshed;
     await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
   }finally{await a.close();await b.close();}
 });
@@ -158,7 +168,10 @@ test('offline catch-up failure recovers after a later focus event',async({browse
     await expect(pb.getByRole('heading',{name:title})).toHaveCount(0);
 
     await pb.unroute('**/api/v1/changes?**');
+    const caughtUp=pb.waitForResponse(r=>r.url().includes('/api/v1/changes?')&&r.ok(),{timeout:15000});
+    const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(title),{timeout:15000});
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await caughtUp;await deckRefreshed;
     await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
   }finally{await a.close();await b.close();}
 });
