@@ -70,7 +70,7 @@ jobs:
             sleep 1
           done
           if [ "$ready" -ne 1 ]; then docker logs "$cid"; exit 1; fi
-          test -f "$volume_dir/vutadex-web.db"
-          test "$(stat -c %u "$volume_dir")" -eq 1000
-          test "$(stat -c %u "$volume_dir/vutadex-web.db")" -eq 1000
+          sudo test -f "$volume_dir/vutadex-web.db"
+          test "$(sudo stat -c %u "$volume_dir")" -eq 1000
+          test "$(sudo stat -c %u "$volume_dir/vutadex-web.db")" -eq 1000
           docker exec "$cid" sh -c 'test -w /data && test -f /data/vutadex-web.db'
