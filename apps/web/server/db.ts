@@ -35,6 +35,14 @@ let txQueue: Promise<unknown> = Promise.resolve();
 
 const tursoUrl = process.env.TURSO_DATABASE_URL;
 
+// Fail closed in production: a deployed instance must never silently boot on
+// ephemeral local SQLite - its data would vanish on every machine restart and
+// each machine would see a different database. Local dev, tests and the CLI
+// keep the node:sqlite fallback (NODE_ENV is not 'production' there).
+if (!tursoUrl && process.env.NODE_ENV === 'production') {
+  throw new Error('TURSO_DATABASE_URL is required when NODE_ENV=production; refusing to boot on ephemeral local SQLite');
+}
+
 async function createNodeSqliteStorage(): Promise<SqlStorage> {
   const { DatabaseSync } = await import('node:sqlite');
   const path = resolve(process.env.VUTADEX_DB || './data/vutadex-web.db');
