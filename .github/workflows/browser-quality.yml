@@ -57,6 +57,15 @@ jobs:
       - name: Install pinned Playwright and axe (test-only, no lockfile edits)
         run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund @playwright/test@1.56.1 @axe-core/playwright@4.10.2
       - run: npx playwright test -c apps/web/playwright.config.mjs --project=firefox --project=webkit
+      # TEMPORARY bounded diagnostic: reproduce the WebKit sync flake with a fixed
+      # repetition limit (10), chosen before running. Evidence is collected whether
+      # this passes or fails via the SYNC-DIAG output added in b662941. This is a
+      # single bounded diagnostic run, not rerun-until-green; the step is removed
+      # after evidence collection regardless of outcome. No timeouts, assertions,
+      # retries, or app code are weakened.
+      - name: Bounded sync-flake diagnosis (10 fixed webkit repetitions)
+        if: always()
+        run: npx playwright test -c apps/web/playwright.config.mjs --project=webkit --grep "reconnecting a temporarily offline device catches up|offline catch-up failure recovers" --repeat-each=10 --retries=0 --workers=1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
