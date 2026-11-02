@@ -8,6 +8,7 @@ import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
+const backend = process.env.VUTADEX_TEST_BACKEND || 'node:sqlite';
 const root = mkdtempSync(join(tmpdir(), 'vutadex-web-api-'));
 const origin = 'http://127.0.0.1:5173';
 let server: ChildProcess;
@@ -26,7 +27,7 @@ async function availablePort():Promise<number> {
 async function start(): Promise<void> {
   const port=await availablePort();base='http://127.0.0.1:'+port;
   server=spawn(process.execPath,['--experimental-strip-types',resolve(import.meta.dirname,'../server/index.ts')],{
-    cwd:resolve(import.meta.dirname,'..'),env:{...process.env,FLY_APP_NAME:undefined,PORT:String(port),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),NODE_ENV:'test',LOG_LEVEL:'silent'},stdio:['ignore','ignore','pipe']
+    cwd:resolve(import.meta.dirname,'..'),env:{...process.env,FLY_APP_NAME:undefined,PORT:String(port),APP_ORIGIN:origin,VUTADEX_DB:join(root,'test.db'),...(backend==='libsql'?{TURSO_DATABASE_URL:'file:'+join(root,'test.db')}:{TURSO_DATABASE_URL:undefined}),NODE_ENV:'test',LOG_LEVEL:'silent'},stdio:['ignore','ignore','pipe']
   });
   server.stderr?.on('data',(part:Buffer)=>{serverStderr += part.toString('utf8');});
   let error:unknown;
@@ -456,7 +457,7 @@ test('full-history broken references fail before any account data is written',as
   assert.equal((await request('/decks','GET',undefined,user.cookie).then(r=>r.json()) as {decks:unknown[]}).decks.length,0);
 });
 
-test('mature retention counts real eligible due reviews and bounded active study time',async()=>{
+test('mature retention counts real eligible due reviews and bounded active study time',{skip:backend==='libsql'&&'direct node:sqlite file inspection is backend-specific'},async()=>{
   const account=await session('mature@example.com');
   const deckId=(await (await request('/decks','POST',{name:'Mature Review'},account.cookie)).json() as {deck:{id:string}}).deck.id;
   assert.equal((await request('/notes','POST',{deckId,type:'basic',front:'Old Q',back:'Old A',tags:''},account.cookie)).status,201);
@@ -542,7 +543,7 @@ test('study serves owned typed-answer and occlusion presentations with stable re
 });
 
 
-test('Fly client IP header gets separate throttle buckets when FLY_APP_NAME is set',async()=>{
+test('Fly client IP header gets separate throttle buckets when FLY_APP_NAME is set',{skip:backend==='libsql'&&'direct node:sqlite file inspection is backend-specific'},async()=>{
   // The app under test for the main suite deliberately has no FLY_APP_NAME.
   // Spawn a separate local process to exercise the Fly-only branch explicitly.
   const port=await availablePort();
@@ -587,7 +588,7 @@ test('Fly client IP header gets separate throttle buckets when FLY_APP_NAME is s
   }finally{flyServer.kill();}
 });
 
-test('forged Fly-Client-IP is ignored when FLY_APP_NAME is unset',async()=>{
+test('forged Fly-Client-IP is ignored when FLY_APP_NAME is unset',{skip:backend==='libsql'&&'direct node:sqlite file inspection is backend-specific'},async()=>{
   // The main test process starts with FLY_APP_NAME explicitly absent.
   // Every forged header must increment the same loopback socket-IP bucket.
   const addresses=['203.0.113.141','203.0.113.142'];
