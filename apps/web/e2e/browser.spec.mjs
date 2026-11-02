@@ -130,6 +130,39 @@ test('reconnecting a temporarily offline device catches up without a second acco
   }finally{await a.close();await b.close();}
 });
 
+// Diagnostic: force an actual failed catch-up while the receiver reconnects.
+// The existing reconnect assertion above remains unchanged.
+test('offline catch-up failure recovers after a later focus event',async({browser})=>{
+  const a=await browser.newContext(),b=await browser.newContext();
+  const pa=await a.newPage(),pb=await b.newPage(),email=unique('failed-catchup');
+  try{
+    await signIn(pa,email);await signIn(pb,email);
+    await pb.goto('/decks');
+    await b.setOffline(true);
+    const title='Recovered after failed catchup '+Date.now();
+    await createDeck(pa,title);
+
+    // The existing SSE connection was interrupted offline. Prevent any new SSE
+    // stream from masking whether the explicit focus catch-up succeeds.
+    await pb.route('**/api/v1/changes/stream?**',route=>route.abort());
+    let failedRequests=0;
+    await pb.route('**/api/v1/changes?**',route=>{
+      failedRequests++;
+      return route.abort('failed');
+    });
+    await b.setOffline(false);
+    await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await expect.poll(()=>failedRequests,{timeout:10000}).toBeGreaterThan(0);
+    // A rejected catch-up alone cannot deliver the new deck to useResource.
+    // This checks the failure state without changing the original test.
+    await expect(pb.getByRole('heading',{name:title})).toHaveCount(0);
+
+    await pb.unroute('**/api/v1/changes?**');
+    await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
+  }finally{await a.close();await b.close();}
+});
+
 test('typed-answer interaction compares learner text and retains self-rating',async({page})=>{
   await signIn(page,unique('typed-review'));
   const origin='http://127.0.0.1:5173';
