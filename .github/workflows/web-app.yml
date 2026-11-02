@@ -60,7 +60,7 @@ jobs:
           sudo chown root:root "$volume_dir"
           cid=""
           trap 'if [ -n "$cid" ]; then docker stop "$cid" >/dev/null 2>&1 || true; fi; sudo rm -rf "$volume_dir"' EXIT
-          cid=$(docker run --detach --rm -e HOST=0.0.0.0 -e PORT=3001 -e VUTADEX_DB=/data/vutadex-web.db -v "$volume_dir:/data" -p 127.0.0.1:3001:3001 vutadex-web:ci)
+          cid=$(docker run --detach --rm -e HOST=0.0.0.0 -e PORT=3001 -e TURSO_DATABASE_URL=file:/data/vutadex-web.db -v "$volume_dir:/data" -p 127.0.0.1:3001:3001 vutadex-web:ci)
           ready=0
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:3001/api/v1/health | grep -q '"status":"ok"'; then
@@ -74,3 +74,10 @@ jobs:
           test "$(sudo stat -c %u "$volume_dir")" -eq 1000
           test "$(sudo stat -c %u "$volume_dir/vutadex-web.db")" -eq 1000
           docker exec "$cid" sh -c 'test -w /data && test -f /data/vutadex-web.db'
+      - name: Production image fails closed without TURSO_DATABASE_URL
+        run: |
+          if docker run --rm -e HOST=0.0.0.0 -e PORT=3001 vutadex-web:ci > guard.log 2>&1; then
+            echo "container booted without TURSO_DATABASE_URL; fail-closed guard broken" >&2
+            exit 1
+          fi
+          grep -q "TURSO_DATABASE_URL is required" guard.log
