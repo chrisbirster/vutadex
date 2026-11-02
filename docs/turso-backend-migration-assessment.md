@@ -15,11 +15,17 @@ Owner decision (2026-11-01): hosted **web** data will use the newly created, emp
 ## Required before this PR can claim implementation
 
 1. Introduce `@libsql/client` (stable `0.18.0` as verified on 2026-11-01) with a regenerated root npm lockfile. Validate `npm ci` in Node 26 and supported CI environments.
-2. Build the backend selector and async storage interface. Keep the existing schema statements and additive migrations. Ensure per-connection FK enforcement, file-only WAL/busy timeout, correct Uint8Array BLOB representation, and explicit failure when a remote URL lacks required credentials.
+2. Build the backend selector and async storage interface. Keep the existing schema statements and additive migrations. Preserve FK declarations and enforce PRAGMA foreign_keys=ON on startup for node:sqlite. For libSQL, apply the pragma only once at startup as best-effort: the @libsql/client 0.18.0 remote WebSocket rotates after 60 seconds and can reconnect without a SQL setup hook, so remote FK enforcement cannot be client-managed and must not be relied upon. Existing API DELETEs touch only challenges, sessions, account_drafts and orphan media_blobs; no cascaded parent is deleted today. Any future deck/note/user delete endpoint MUST use explicit dependency-ordered deletes in a transaction rather than rely on remote cascades. Keep local-only WAL/busy timeout, correct Uint8Array BLOB representation, and explicit failure when a remote URL lacks required credentials.
 3. Scope libSQL operations to an ALS transaction context; for node:sqlite protect against concurrency/interleaving between async transactions. Verify BEGIN IMMEDIATE, commit, rollback, constraint enforcement, and non-transaction traffic semantics.
 4. Propagate `await` through all routes, auth/session helpers, review logic, media handling and long-running import loops. Reject unawaited transaction callbacks in review.
-5. Run the same black-box suite on separate temporary node:sqlite and `file:` libSQL files, with node-only direct file introspection; include explicit libSQL cascade, byte-identical media roundtrip and strictly increasing owner change-feed sequences.
+5. Run the same black-box suite on separate temporary node:sqlite and `file:` libSQL files, with node-only direct file introspection; assert actual leaf deletion behavior on BOTH backends (consumed magic-link challenge, logout invalidating a session, orphan media pruning), plus byte-identical media roundtrip and strictly increasing owner change-feed sequences. Do NOT add a deck FK cascade test: no deck-delete API exists.
 6. Confirm web/terminal/root checks and full CI are green before describing the port as complete.
 7. When implementation is ready, update the hosted runbook (without changing `fly.toml` or removing the PR #90 volume/entrypoint fallback) and document Turso secrets.
 
 **NOT DONE:** No schema created or writes in hosted Turso, no auth token created, no Fly secrets, no provisioning, no deployment. This draft branch does not currently contain the backend conversion.
+
+## Remote verification and billing boundaries
+
+The libSQL `file:` tests prove the client/engine code path locally, **not** remote Turso correctness. Later staging must explicitly verify FK behavior over the wire (while not relying on it), acceptance of images up to the app's 2 MB limit, and transaction/failure semantics during network disruption. This PR makes **no calls** to hosted Turso.
+
+At the current plan and usage there is **no added subscription charge**; overage billing is disabled on the account, so usage-based charges cannot accrue unless someone enables it. This is a present-state description, not a future pricing guarantee.
