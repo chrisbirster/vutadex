@@ -3,6 +3,7 @@ import pino from 'pino';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { db, transaction } from './db.ts';
 import { mailConfig, sendViaSes } from './email.ts';
 import { ContentError, validateNote, generateVariants, parseDeckFile, parseCsv, serializeDeckFile, type NotePayload, type ImportedDeck } from './content.ts';
@@ -20,6 +21,7 @@ const logger = pino({ level: process.env.LOG_LEVEL || 'info', redact: { paths: [
 const production = process.env.NODE_ENV === 'production';
 const origin = process.env.APP_ORIGIN || 'http://127.0.0.1:5173';
 const port = Number(process.env.PORT || 3001);
+const host = process.env.HOST || '127.0.0.1';
 const cookieName = production ? '__Host-vutadex_session' : 'vutadex_session';
 const now = () => Date.now();
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -87,7 +89,15 @@ function canonicalEmail(value:unknown):string{
 }
 app.post('/api/v1/auth/magic-links',handler(async(req,res)=>{
   const email=canonicalEmail(req.body?.email);
-  const ip=req.socket.remoteAddress||'unknown';
+  // Fly Proxy overwrites Fly-Client-IP on public ingress (unspoofable there).
+  // Trust it only on Fly (FLY_APP_NAME), with HOST=0.0.0.0 IPv4-only in production:
+  // Fly private Machine-to-Machine networking uses IPv6, so never bind :: or [::].
+  // Fly org members with private-network/flyctl access are trusted operators.
+  // https://community.fly.io/t/security-guidance-verifying-fly-proxy-socket-peers-and-forwarded-headers/28891
+  // https://fly.io/docs/networking/request-headers/
+  // Do not enable global Express trust proxy.
+  const forwarded = process.env.FLY_APP_NAME ? req.get('Fly-Client-IP')?.trim() : undefined;
+  const ip = forwarded && isIP(forwarded) ? forwarded : req.socket.remoteAddress || 'unknown';
   const ipAllowed=throttle('ip:'+hash(ip),process.env.NODE_ENV==='test'?1000:30,3600000);
   const emailAllowed=throttle('email:'+hash(email),5,3600000);
   const cooldown=throttle('cooldown:'+hash(email),1,process.env.NODE_ENV==='test'?0:60000);
@@ -735,6 +745,6 @@ app.use((err:unknown,_req:Request,res:Response,_next:NextFunction)=>{
   if(status===500)logger.error({name:err instanceof Error?err.name:'Error'},'request failed');
   res.status(status).json({error:status===500?'Unexpected server error':(err as Error).message});
 });
-const server=app.listen(port,'127.0.0.1',()=>logger.info({port},'Vutadex web API listening'));
+const server=app.listen(port,host,()=>logger.info({host,port},'Vutadex web API listening'));
 function shutdown(){server.close(()=>{db.close();process.exit(0);});}
 process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

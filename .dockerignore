@@ -1,0 +1,26 @@
+# Dependencies and build products are created by the Docker build.
+**/node_modules
+**/node_modules/**
+**/dist
+**/dist/**
+**/coverage
+**/coverage/**
+**/data
+**/data/**
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Never include local secrets or repository history in Docker context.
+**/.env
+**/.env.*
+.git
+.git/**
+.github
+.github/**
+
+# Browser test artifacts and local caches.
+**/playwright-report
+**/test-results
+**/.cache
+**/.DS_Store

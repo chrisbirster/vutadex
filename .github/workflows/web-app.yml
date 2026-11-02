@@ -9,6 +9,9 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/web-app.yml'
+      - '.dockerignore'
+      - 'fly.toml'
+      - 'docs/production-runbook.md'
 permissions:
   contents: read
 jobs:
@@ -27,3 +30,47 @@ jobs:
       - run: npm run terminal:check
       - run: npm run build
       - run: node --test test/packaged-cli.verify.ts test/package-manifest.verify.ts
+  image-smoke:
+    name: Node 26 Docker image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image locally in CI (never deploy)
+        run: docker build --file apps/web/Dockerfile --tag vutadex-web:ci .
+      - name: Check image-layer directory and privilege drop
+        run: |
+          docker run --rm --entrypoint sh vutadex-web:ci -c 'test "$(id -u)" -eq 0 && test -d /data && test "$(stat -c %u /data)" -eq 1000 && command -v runuser'
+          docker run --rm vutadex-web:ci sh -c 'test "$(id -u)" -eq 1000 && test -w /data'
+      - name: Validate production Fly IPv4-only ingress bind
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import assert from "node:assert/strict";
+            const fly = readFileSync("fly.toml", "utf8");
+            const env = fly.split(/^\[env\]\s*$/m)[1]?.split(/^\[/m)[0];
+            assert.ok(env, "missing Fly production env");
+            const host = env.match(/^\s*HOST\s*=\s*"([^"]+)"/m)?.[1];
+            assert.equal(host, "0.0.0.0", "Fly MUST bind IPv4-only, never :: or [::]");
+          '
+      - name: Smoke test fresh root-owned mounted volume and database
+        run: |
+          volume_dir=$(mktemp -d)
+          chmod 700 "$volume_dir"
+          sudo chown root:root "$volume_dir"
+          cid=""
+          trap 'if [ -n "$cid" ]; then docker stop "$cid" >/dev/null 2>&1 || true; fi; sudo rm -rf "$volume_dir"' EXIT
+          cid=$(docker run --detach --rm -e HOST=0.0.0.0 -e PORT=3001 -e VUTADEX_DB=/data/vutadex-web.db -v "$volume_dir:/data" -p 127.0.0.1:3001:3001 vutadex-web:ci)
+          ready=0
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3001/api/v1/health | grep -q '"status":"ok"'; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then docker logs "$cid"; exit 1; fi
+          sudo test -f "$volume_dir/vutadex-web.db"
+          test "$(sudo stat -c %u "$volume_dir")" -eq 1000
+          test "$(sudo stat -c %u "$volume_dir/vutadex-web.db")" -eq 1000
+          docker exec "$cid" sh -c 'test -w /data && test -f /data/vutadex-web.db'

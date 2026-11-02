@@ -1,0 +1,39 @@
+# PROPOSED staging-first deployment; owner approval required before use.
+# This is a NEW app and does not replace the legacy vutadex-app.
+app = "vutadex-web"
+primary_region = "iad"
+
+[deploy]
+  strategy = "rolling"
+
+[build]
+  dockerfile = "apps/web/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  HOST = "0.0.0.0"
+  PORT = "3001"
+  VUTADEX_DB = "/data/vutadex-web.db"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/v1/health"
+
+# One persistent volume on exactly one Machine. No SQLite multi-instance use.
+[[mounts]]
+  source = "vutadex_data"
+  destination = "/data"
+
+# Set APP_ORIGIN, AWS_REGION, SES_FROM_EMAIL, AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY and optionally AWS_SESSION_TOKEN as Fly secrets.
+# Never commit credentials or real APP_ORIGIN values here.
