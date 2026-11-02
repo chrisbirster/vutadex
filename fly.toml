@@ -9,11 +9,17 @@ primary_region = "iad"
 [build]
   dockerfile = "apps/web/Dockerfile"
 
+# Exactly one small machine. fly deploy creates TWO machines by default for an
+# app with an http service (docs.fly.io/apps/app-availability), so deploy with:
+#   fly deploy --ha=false
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
 [env]
   NODE_ENV = "production"
   HOST = "0.0.0.0"
   PORT = "3001"
-  VUTADEX_DB = "/data/vutadex-web.db"
 
 [http_service]
   internal_port = 3001
@@ -29,11 +35,13 @@ primary_region = "iad"
     method = "GET"
     path = "/api/v1/health"
 
-# One persistent volume on exactly one Machine. No SQLite multi-instance use.
-[[mounts]]
-  source = "vutadex_data"
-  destination = "/data"
-
-# Set APP_ORIGIN, AWS_REGION, SES_FROM_EMAIL, AWS_ACCESS_KEY_ID,
-# AWS_SECRET_ACCESS_KEY and optionally AWS_SESSION_TOKEN as Fly secrets.
-# Never commit credentials or real APP_ORIGIN values here.
+# Staging uses Turso exclusively (owner decision 2026-11-01): no persistent
+# volume and no local-SQLite fallback in the deployed app. The server fails
+# closed at boot when NODE_ENV=production and TURSO_DATABASE_URL is unset, so a
+# misconfigured deploy stops instead of running on ephemeral storage. Local
+# SQLite remains for tests and the CLI app, unchanged.
+#
+# Set TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, APP_ORIGIN, AWS_REGION,
+# SES_FROM_EMAIL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and optionally
+# AWS_SESSION_TOKEN as Fly secrets. Never commit credentials or real
+# APP_ORIGIN values here.
