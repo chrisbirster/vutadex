@@ -1,6 +1,6 @@
 # Turso/libSQL web backend migration — implementation checklist
 
-**Status:** architecture assessment only. This document is **not** a completed implementation, does not enable Turso and does not authorize staging deployment.
+**Status:** SUPERSEDED historical assessment (written 2026-11-01, before implementation). The implementation this document scoped has since landed on this branch: dual-backend storage in `124919c`, the remote-verification harness with measured results in `957740d`, and the E2E synchronization fix in `a301251`. For current measured state and exact remaining limitations see the PR #91 body and `docs/production-runbook.md`. The checklist below is preserved as the original pre-implementation record; its "NOT DONE" section was accurate when written and no longer describes this branch.
 
 Owner decision (2026-11-01): hosted **web** data will use the newly created, empty `vutadex-web` Turso database (`libsql://vutadex-web-chrisbirster.aws-us-east-1.turso.io`; default group, AWS us-east-1). The older `vutadex` database has an incompatible marketplace/organizations schema and must remain untouched. CLI, local tests, and the three `apps/web/scripts` entrypoints continue using `node:sqlite`.
 
