@@ -42,6 +42,9 @@ const tursoUrl = process.env.TURSO_DATABASE_URL;
 if (!tursoUrl && process.env.NODE_ENV === 'production') {
   throw new Error('TURSO_DATABASE_URL is required when NODE_ENV=production; refusing to boot on ephemeral local SQLite');
 }
+if (tursoUrl && !tursoUrl.startsWith('file:') && !process.env.TURSO_AUTH_TOKEN && process.env.NODE_ENV === 'production') {
+  throw new Error('TURSO_AUTH_TOKEN is required for a remote Turso database when NODE_ENV=production');
+}
 
 async function createNodeSqliteStorage(): Promise<SqlStorage> {
   const { DatabaseSync } = await import('node:sqlite');
