@@ -127,7 +127,13 @@ function Bongo({mood='happy',size='regular'}:{mood?:'happy'|'sleepy'|'thinking'|
 const NAV=[{to:'/' as const,label:'Home',icon:Home},{to:'/decks' as const,label:'Decks',icon:Layers3},{to:'/study' as const,label:'Study',icon:Play},{to:'/cards/new' as const,label:'Add Cards',icon:SquarePlus},{to:'/stats' as const,label:'Stats',icon:ChartNoAxesColumnIncreasing},{to:'/settings' as const,label:'Settings',icon:Settings}];
 function Application(){
   const [session,setSession]=useImmer<SessionState>({user:null,loading:true,error:''});
-  const refresh=async()=>{try{const r=await api<{user:User}>('/session');setSession({user:r.user,loading:false,error:''});}catch{setSession({user:null,loading:false,error:''});}};
+  // Only a definitive 401 means signed out (the /session contract: 401 'Sign in
+  // required' / 'Session expired'; 403 is never an auth-state signal here). A
+  // transient network error must NOT
+  // demote an established session to null: LoginPage would replace the app tree,
+  // unmount AccountSyncProvider, and tear down synchronization - a brief connectivity
+  // drop would look exactly like a logout (this was the observed WebKit CI failure).
+  const refresh=async()=>{try{const r=await api<{user:User}>('/session');setSession({user:r.user,loading:false,error:''});}catch(e){if(e instanceof ApiRequestError&&e.status===401){setSession({user:null,loading:false,error:''});}else{setSession(d=>{d.loading=false;d.error='connection';});}}};
   useEffect(()=>{void refresh();},[]);
   useEffect(()=>{if(typeof BroadcastChannel==='undefined')return;const c=new BroadcastChannel('vutadex:session');c.onmessage=()=>void refresh();return()=>c.close();},[]);
   const path=useRouterState({select:s=>s.location.pathname});

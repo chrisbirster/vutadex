@@ -190,6 +190,39 @@ test('offline catch-up failure recovers after a later focus event',async({browse
   }finally{await a.close();await b.close();}
 });
 
+test('an established session survives a transient network failure',async({browser})=>{
+  const ctx=await browser.newContext(),pa=await ctx.newPage(),pb=await ctx.newPage();
+  try{
+    const email=unique('session-resilience');
+    await signIn(pa,email);await signIn(pb,email);
+    await pb.goto('/decks');
+    await expect(pb.getByRole('button',{name:'Sign out'})).toBeVisible();
+    await ctx.setOffline(true);
+    // Force a session refresh while offline via the app's own BroadcastChannel
+    // mechanism: pb's /session fetch must fail against the offline network.
+    await pa.evaluate(()=>{const c=new BroadcastChannel('vutadex:session');c.postMessage('session-changed');c.close();});
+    await pb.waitForTimeout(1500);
+    await ctx.setOffline(false);
+    // The established session must be retained: app shell still mounted, no sign-in bounce.
+    await expect(pb.getByRole('button',{name:'Sign out'})).toBeVisible();
+    await expect(pb.getByRole('button',{name:'Send magic link'})).toHaveCount(0);
+  }finally{await ctx.close();}
+});
+
+test('a genuinely expired session returns to sign-in',async({browser})=>{
+  const ctx=await browser.newContext(),p=await ctx.newPage();
+  try{
+    await signIn(p,unique('session-expiry'));
+    await p.goto('/decks');
+    await expect(p.getByRole('button',{name:'Sign out'})).toBeVisible();
+    // Revoke every session server-side, then reload: the next /session check
+    // gets a definitive 401 and the app must present sign-in.
+    await p.evaluate(()=>fetch('/api/v1/sessions/revoke-all',{method:'POST',credentials:'same-origin'}));
+    await p.reload();
+    await expect(p.getByRole('button',{name:'Send magic link'})).toBeVisible();
+  }finally{await ctx.close();}
+});
+
 test('typed-answer interaction compares learner text and retains self-rating',async({page})=>{
   await signIn(page,unique('typed-review'));
   const origin='http://127.0.0.1:5173';
