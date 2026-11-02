@@ -1,0 +1,25 @@
+# Turso/libSQL web backend migration — implementation checklist
+
+**Status:** architecture assessment only. This document is **not** a completed implementation, does not enable Turso and does not authorize staging deployment.
+
+Owner decision (2026-11-01): hosted **web** data will use the newly created, empty `vutadex-web` Turso database (`libsql://vutadex-web-chrisbirster.aws-us-east-1.turso.io`; default group, AWS us-east-1). The older `vutadex` database has an incompatible marketplace/organizations schema and must remain untouched. CLI, local tests, and the three `apps/web/scripts` entrypoints continue using `node:sqlite`.
+
+## Verified dev baseline
+
+- Branch point: `8dd24fac0ae1f970c831396c61bf9cc76ff4d4fe`.
+- `apps/web/server/db.ts` currently bootstraps the complete SQLite schema at import time and exposes a synchronous `transaction()`.
+- `apps/web/server/index.ts` is built around synchronous `query()`, `list()`, `run()` and synchronously nested transaction callbacks. Changing only the database adapter would produce unawaited promises and incorrect transaction behavior.
+- `apps/web/test/api.test.ts` starts its own server and directly inspects the node:sqlite test file at three assertions.
+- `apps/web/package.json` uses `node --test test/*.test.ts`, so adding `api-libsql.test.ts` will be discovered by the current web check command.
+
+## Required before this PR can claim implementation
+
+1. Introduce `@libsql/client` (stable `0.18.0` as verified on 2026-11-01) with a regenerated root npm lockfile. Validate `npm ci` in Node 26 and supported CI environments.
+2. Build the backend selector and async storage interface. Keep the existing schema statements and additive migrations. Ensure per-connection FK enforcement, file-only WAL/busy timeout, correct Uint8Array BLOB representation, and explicit failure when a remote URL lacks required credentials.
+3. Scope libSQL operations to an ALS transaction context; for node:sqlite protect against concurrency/interleaving between async transactions. Verify BEGIN IMMEDIATE, commit, rollback, constraint enforcement, and non-transaction traffic semantics.
+4. Propagate `await` through all routes, auth/session helpers, review logic, media handling and long-running import loops. Reject unawaited transaction callbacks in review.
+5. Run the same black-box suite on separate temporary node:sqlite and `file:` libSQL files, with node-only direct file introspection; include explicit libSQL cascade, byte-identical media roundtrip and strictly increasing owner change-feed sequences.
+6. Confirm web/terminal/root checks and full CI are green before describing the port as complete.
+7. When implementation is ready, update the hosted runbook (without changing `fly.toml` or removing the PR #90 volume/entrypoint fallback) and document Turso secrets.
+
+**NOT DONE:** No schema created or writes in hosted Turso, no auth token created, no Fly secrets, no provisioning, no deployment. This draft branch does not currently contain the backend conversion.
