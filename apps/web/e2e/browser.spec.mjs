@@ -124,6 +124,14 @@ test('reconnecting a temporarily offline device catches up without a second acco
   try{
     await signIn(pa,email);await signIn(pb,email);
     await pb.goto('/decks');
+    // Diagnostics: record sync-relevant network/focus/fetch activity so a failure
+    // shows what actually happened instead of a bare timeout.
+    const netLog=[];
+    pb.on('request',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('req '+r.method()+' '+r.url());});
+    pb.on('requestfailed',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfailed '+r.url()+' '+(r.failure()?.errorText||''));});
+    pb.on('requestfinished',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfinished '+r.url());});
+    pb.on('pageerror',e=>netLog.push('pageerror '+e.message));
+    await pb.evaluate(()=>{window.__syncDiag={focusEvents:0,fetchCalls:[]};window.addEventListener('focus',()=>window.__syncDiag.focusEvents++);const of=window.fetch;window.fetch=(...a)=>{window.__syncDiag.fetchCalls.push(String(a[0]&&a[0].url?a[0].url:a[0]));return of(...a);};});
     await b.setOffline(true);
     const title='Reconnected '+Date.now();
     await createDeck(pa,title);
@@ -135,7 +143,7 @@ test('reconnecting a temporarily offline device catches up without a second acco
     const caughtUp=pb.waitForResponse(r=>r.url().includes('/api/v1/changes?')&&r.ok(),{timeout:15000});
     const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(title),{timeout:15000});
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
-    await caughtUp;await deckRefreshed;
+    try{await caughtUp;await deckRefreshed;}catch(e){const diag=await pb.evaluate(()=>window.__syncDiag);console.log('SYNC-DIAG reconnect',JSON.stringify({diag,netLog}));throw e;}
     await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
   }finally{await a.close();await b.close();}
 });
@@ -148,6 +156,12 @@ test('offline catch-up failure recovers after a later focus event',async({browse
   try{
     await signIn(pa,email);await signIn(pb,email);
     await pb.goto('/decks');
+    const netLog=[];
+    pb.on('request',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('req '+r.method()+' '+r.url());});
+    pb.on('requestfailed',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfailed '+r.url()+' '+(r.failure()?.errorText||''));});
+    pb.on('requestfinished',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfinished '+r.url());});
+    pb.on('pageerror',e=>netLog.push('pageerror '+e.message));
+    await pb.evaluate(()=>{window.__syncDiag={focusEvents:0,fetchCalls:[]};window.addEventListener('focus',()=>window.__syncDiag.focusEvents++);const of=window.fetch;window.fetch=(...a)=>{window.__syncDiag.fetchCalls.push(String(a[0]&&a[0].url?a[0].url:a[0]));return of(...a);};});
     await b.setOffline(true);
     const title='Recovered after failed catchup '+Date.now();
     await createDeck(pa,title);
@@ -162,7 +176,7 @@ test('offline catch-up failure recovers after a later focus event',async({browse
     });
     await b.setOffline(false);
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
-    await expect.poll(()=>failedRequests,{timeout:10000}).toBeGreaterThan(0);
+    try{await expect.poll(()=>failedRequests,{timeout:10000}).toBeGreaterThan(0);}catch(e){const diag=await pb.evaluate(()=>window.__syncDiag);console.log('SYNC-DIAG failed-catchup',JSON.stringify({diag,netLog,failedRequests}));throw e;}
     // A rejected catch-up alone cannot deliver the new deck to useResource.
     // This checks the failure state without changing the original test.
     await expect(pb.getByRole('heading',{name:title})).toHaveCount(0);
