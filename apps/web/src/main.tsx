@@ -21,6 +21,12 @@ const SessionContext=createContext<SessionContextValue|null>(null);
 function broadcastSessionChange(){if(typeof BroadcastChannel!=='undefined'){const c=new BroadcastChannel('vutadex:session');c.postMessage('session-changed');c.close();}}
 
 const AccountChangeContext=createContext(0);
+// Bound each catch-up page request: an unbounded fetch can hang indefinitely and
+// leave the sync loop silently wedged (neither connected nor failing). On timeout
+// the request rejects, connected flips false, the SSE fallback still opens, and the
+// next user-driven focus/visibility event starts a fresh catch-up (no auto-retry).
+// AbortSignal.timeout is supported by every targeted browser (Chrome 103+, Firefox 100+, Safari 16+).
+const SYNC_REQUEST_TIMEOUT_MS=15000;
 function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>Promise<void>;children:React.ReactNode}){
   const [state,setState]=useImmer({cursor:0,revision:0,connected:false});
   useEffect(()=>{
@@ -31,7 +37,7 @@ function AccountSyncProvider({owner,refresh,children}:{owner:string;refresh:()=>
       try{
         let more=true;
         while(!closed&&more){
-          const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq);
+          const response=await api<{changes:{seq:number}[];cursor:number;hasMore:boolean}>('/changes?since='+seq,{signal:AbortSignal.timeout(SYNC_REQUEST_TIMEOUT_MS)});
           if(response.changes.length)setState(d=>{d.revision++;});
           seq=Math.max(seq,response.cursor);more=response.hasMore;
         }
@@ -121,7 +127,13 @@ function Bongo({mood='happy',size='regular'}:{mood?:'happy'|'sleepy'|'thinking'|
 const NAV=[{to:'/' as const,label:'Home',icon:Home},{to:'/decks' as const,label:'Decks',icon:Layers3},{to:'/study' as const,label:'Study',icon:Play},{to:'/cards/new' as const,label:'Add Cards',icon:SquarePlus},{to:'/stats' as const,label:'Stats',icon:ChartNoAxesColumnIncreasing},{to:'/settings' as const,label:'Settings',icon:Settings}];
 function Application(){
   const [session,setSession]=useImmer<SessionState>({user:null,loading:true,error:''});
-  const refresh=async()=>{try{const r=await api<{user:User}>('/session');setSession({user:r.user,loading:false,error:''});}catch{setSession({user:null,loading:false,error:''});}};
+  // Only a definitive 401 means signed out (the /session contract: 401 'Sign in
+  // required' / 'Session expired'; 403 is never an auth-state signal here). A
+  // transient network error must NOT
+  // demote an established session to null: LoginPage would replace the app tree,
+  // unmount AccountSyncProvider, and tear down synchronization - a brief connectivity
+  // drop would look exactly like a logout (this was the observed WebKit CI failure).
+  const refresh=async()=>{try{const r=await api<{user:User}>('/session');setSession({user:r.user,loading:false,error:''});}catch(e){if(e instanceof ApiRequestError&&e.status===401){setSession({user:null,loading:false,error:''});}else{setSession(d=>{d.loading=false;d.error='connection';});}}};
   useEffect(()=>{void refresh();},[]);
   useEffect(()=>{if(typeof BroadcastChannel==='undefined')return;const c=new BroadcastChannel('vutadex:session');c.onmessage=()=>void refresh();return()=>c.close();},[]);
   const path=useRouterState({select:s=>s.location.pathname});

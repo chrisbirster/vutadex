@@ -42,7 +42,11 @@ test('two browsers: shared decks, draft editing and conflicting note writes are 
     await signIn(pa,email);await signIn(pb,email);
     const name='Sync '+Date.now();
     await pb.goto('/decks');
+    // Synchronize on the actual sync signal (SSE-triggered /decks refetch) before
+    // the UI assertion, so the test measures sync correctness, not machine speed.
+    const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(name),{timeout:12000});
     await createDeck(pa,name);
+    await deckRefreshed;
     await expect(pb.getByRole('heading',{name})).toBeVisible({timeout:12000});
     await pa.getByRole('link',{name:'Add Cards'}).last().click();
     await pa.getByLabel('Front').fill('What is a race condition?');
@@ -120,12 +124,26 @@ test('reconnecting a temporarily offline device catches up without a second acco
   try{
     await signIn(pa,email);await signIn(pb,email);
     await pb.goto('/decks');
+    // Diagnostics: record sync-relevant network/focus/fetch activity so a failure
+    // shows what actually happened instead of a bare timeout.
+    const netLog=[];
+    pb.on('request',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('req '+r.method()+' '+r.url());});
+    pb.on('requestfailed',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfailed '+r.url()+' '+(r.failure()?.errorText||''));});
+    pb.on('requestfinished',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfinished '+r.url());});
+    pb.on('pageerror',e=>netLog.push('pageerror '+e.message));
+    await pb.evaluate(()=>{window.__syncDiag={focusEvents:0,fetchCalls:[]};window.addEventListener('focus',()=>window.__syncDiag.focusEvents++);const of=window.fetch;window.fetch=(...a)=>{window.__syncDiag.fetchCalls.push(String(a[0]&&a[0].url?a[0].url:a[0]));return of(...a);};});
     await b.setOffline(true);
     const title='Reconnected '+Date.now();
     await createDeck(pa,title);
     await b.setOffline(false);
     await pb.bringToFront();
+    // Register sync-signal waits before the focus event so the catch-up response
+    // and the resulting /decks refetch cannot race past the listeners. The heading
+    // assertion below still proves the UI actually renders the synced deck.
+    const caughtUp=pb.waitForResponse(r=>r.url().includes('/api/v1/changes?')&&r.ok(),{timeout:15000});
+    const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(title),{timeout:15000});
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    try{await caughtUp;await deckRefreshed;}catch(e){const diag=await pb.evaluate(()=>window.__syncDiag);console.log('SYNC-DIAG reconnect',JSON.stringify({diag,netLog}));throw e;}
     await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
   }finally{await a.close();await b.close();}
 });
@@ -138,6 +156,12 @@ test('offline catch-up failure recovers after a later focus event',async({browse
   try{
     await signIn(pa,email);await signIn(pb,email);
     await pb.goto('/decks');
+    const netLog=[];
+    pb.on('request',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('req '+r.method()+' '+r.url());});
+    pb.on('requestfailed',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfailed '+r.url()+' '+(r.failure()?.errorText||''));});
+    pb.on('requestfinished',r=>{if(r.url().includes('/api/v1/changes')||r.url().includes('/api/v1/decks'))netLog.push('reqfinished '+r.url());});
+    pb.on('pageerror',e=>netLog.push('pageerror '+e.message));
+    await pb.evaluate(()=>{window.__syncDiag={focusEvents:0,fetchCalls:[]};window.addEventListener('focus',()=>window.__syncDiag.focusEvents++);const of=window.fetch;window.fetch=(...a)=>{window.__syncDiag.fetchCalls.push(String(a[0]&&a[0].url?a[0].url:a[0]));return of(...a);};});
     await b.setOffline(true);
     const title='Recovered after failed catchup '+Date.now();
     await createDeck(pa,title);
@@ -152,15 +176,51 @@ test('offline catch-up failure recovers after a later focus event',async({browse
     });
     await b.setOffline(false);
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
-    await expect.poll(()=>failedRequests,{timeout:10000}).toBeGreaterThan(0);
+    try{await expect.poll(()=>failedRequests,{timeout:10000}).toBeGreaterThan(0);}catch(e){const diag=await pb.evaluate(()=>window.__syncDiag);console.log('SYNC-DIAG failed-catchup',JSON.stringify({diag,netLog,failedRequests}));throw e;}
     // A rejected catch-up alone cannot deliver the new deck to useResource.
     // This checks the failure state without changing the original test.
     await expect(pb.getByRole('heading',{name:title})).toHaveCount(0);
 
     await pb.unroute('**/api/v1/changes?**');
+    const caughtUp=pb.waitForResponse(r=>r.url().includes('/api/v1/changes?')&&r.ok(),{timeout:15000});
+    const deckRefreshed=pb.waitForResponse(async r=>r.url().includes('/api/v1/decks')&&r.request().method()==='GET'&&r.ok()&&(await r.text()).includes(title),{timeout:15000});
     await pb.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await caughtUp;await deckRefreshed;
     await expect(pb.getByRole('heading',{name:title})).toBeVisible({timeout:15000});
   }finally{await a.close();await b.close();}
+});
+
+test('an established session survives a transient network failure',async({browser})=>{
+  const ctx=await browser.newContext(),pa=await ctx.newPage(),pb=await ctx.newPage();
+  try{
+    const email=unique('session-resilience');
+    await signIn(pa,email);await signIn(pb,email);
+    await pb.goto('/decks');
+    await expect(pb.getByRole('button',{name:'Sign out'})).toBeVisible();
+    await ctx.setOffline(true);
+    // Force a session refresh while offline via the app's own BroadcastChannel
+    // mechanism: pb's /session fetch must fail against the offline network.
+    await pa.evaluate(()=>{const c=new BroadcastChannel('vutadex:session');c.postMessage('session-changed');c.close();});
+    await pb.waitForTimeout(1500);
+    await ctx.setOffline(false);
+    // The established session must be retained: app shell still mounted, no sign-in bounce.
+    await expect(pb.getByRole('button',{name:'Sign out'})).toBeVisible();
+    await expect(pb.getByRole('button',{name:'Send magic link'})).toHaveCount(0);
+  }finally{await ctx.close();}
+});
+
+test('a genuinely expired session returns to sign-in',async({browser})=>{
+  const ctx=await browser.newContext(),p=await ctx.newPage();
+  try{
+    await signIn(p,unique('session-expiry'));
+    await p.goto('/decks');
+    await expect(p.getByRole('button',{name:'Sign out'})).toBeVisible();
+    // Revoke every session server-side, then reload: the next /session check
+    // gets a definitive 401 and the app must present sign-in.
+    await p.evaluate(()=>fetch('/api/v1/sessions/revoke-all',{method:'POST',credentials:'same-origin'}));
+    await p.reload();
+    await expect(p.getByRole('button',{name:'Send magic link'})).toBeVisible();
+  }finally{await ctx.close();}
 });
 
 test('typed-answer interaction compares learner text and retains self-rating',async({page})=>{
